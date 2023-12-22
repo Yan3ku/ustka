@@ -34,16 +34,44 @@ struct Cons {
 	ConsType type;
 };
 
-/* macros allows being lvaues */
-#define cdr(cons)  ((cons)->get.cell.cdr)
-#define car(cons)  ((cons)->get.cell.car)
-#define cadr(cons) car(cdr(cons))
-#define cddr(cons) cdr(cdr(cons))
-#define get(cons, field) ((cons)->get.atom.get.field)
+int loglevel = 1;
 
-static void readcons(FILE *input, Cons **cons); /* read construct conses */
+/* macros allows being lvaues */
+#define cdr(c)  ((c)->get.cell.cdr)
+#define car(c)    ((c)->get.cell.car)
+#define cadr(c)   car(cdr(c))
+#define cddr(c)   cdr(cdr(c))
+#define get(c, t) ((c)->get.atom.get.t)
+#define islist(c) (car(c)->type == A_CELL)
+
+
+/* show trace how read is parsing sexps */
+#define NDEBUG
+#ifdef NDEBUG
+#define LOC_() fprintf(stderr, "[%s@%-10s:%-3d] ", __FILE__, __func__, __LINE__)
+#define INFO2(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
+#define INFOLN2(...) do { INFO2(__VA_ARGS__); INFO2("\n"); } while (0)
+#define INFO(...)  do { LOC_(); INFO2(__VA_ARGS__) } while (0)
+#define INFOLN(...) do { INFO(__VA_ARGS__); INFO2("\n"); } while (0)
+#define INFODEPTH(depth, ...) do {					\
+		LOC_();                                                 \
+		for (int i = 0; i < depth; i++) fputc('>', stderr);	\
+		fputc(' ', stderr);					\
+		INFO2(__VA_ARGS__);                                     \
+} while (0)
+#define INFODEPTHLN(depth, ...) do { INFODEPTH(depth, __VA_ARGS__); INFO2("\n"); } while (0)
+#else
+#define INFO(...)
+#define INFOLN(...)
+#define INFODEPTH(...)
+#endif
+
+
+
+
+static void readcons(FILE *input, Cons **cons, int depth); /* read construct conses */
 static Cons *readatom(FILE *input);
-static Cons *read(FILE *input);			/* main entry to read */
+static Cons *read_(FILE *input, int depth);			/* main entry to read */
 
 Cons *
 alloccons(ConsType type)
@@ -54,38 +82,38 @@ alloccons(ConsType type)
 }
 
 void
-readcons(FILE *input, Cons **cons)
+readcons(FILE *input, Cons **cons, int depth)
 {
 	char ch;
        	while (isblank(ch = fgetc(input)) && ch != EOF);
 	if (feof(input)) return; /* todo: signal error */
 	switch (ch) {
         case '(': {
-		printf("entering list\n");
+		INFODEPTHLN(depth, "OPENING");
 		(*cons) = alloccons(A_CELL);
-		readcons(input, &car(*cons));
-		readcons(input, &cdr(*cons));
+		readcons(input, &car(*cons), depth + 1);
+		readcons(input, &cdr(*cons), depth);
 		break;
 	} case ')':
-		printf("closing list\n");
+		INFODEPTHLN(depth, "CLOSING");
 		(*cons) = NULL;
 		break;
 	default: {
 		ungetc(ch, input);
 		if (ch != '.') {
-			printf("reading atom: ");
+			INFODEPTH(depth, "ATOM :: ");
 			(*cons) = alloccons(A_CELL);
 			Cons *atom = readatom(input);
-			printf("%s\n", get(atom, sym));
+			INFOLN2("%s", get(atom, sym));
 			car(*cons) = atom;
-			readcons(input, &cdr(*cons));
+			readcons(input, &cdr(*cons), depth);
 		} else {
+			INFODEPTHLN(depth, ":: DOT ::");
 			fgetc(input);
-			printf("reading cdr list:\n ");
-			*cons = read(input);
+			*cons = read_(input, depth);
 			while (isblank(ch = fgetc(input)) && ch != EOF);
 			if (ch != ')') {
-				printf("error: expected )\n");
+				INFODEPTHLN(depth, "ERROR: expected left paren");
 			}
 		}
 		break;
@@ -93,7 +121,7 @@ readcons(FILE *input, Cons **cons)
 	}
 }
 
-void				/* this function werks fine, tested on input */
+void
 readsym(FILE *input, char *sym) {
 	char ch, *p;
 	for (p = sym; p - sym < SYM_LEN && !isblank(ch = fgetc(input)) &&
@@ -114,22 +142,23 @@ readatom(FILE *input)
 }
 
 Cons *
-read(FILE *input)
+read_(FILE *input, int depth)
 {
 	char ch;
 	while (isblank(ch = fgetc(input)) && ch != EOF);
 	switch (ch) {
 	case '(': {
-		printf("entering list\n");
+		INFODEPTHLN(depth, "OPENING");
 		Cons *cons = alloccons(A_CELL);
-		readcons(input, &cons);
+		readcons(input, &cons, depth + 1);
+		INFODEPTHLN(depth, "CLOSING");
 		return cons;
 	}
 	default:{
 		ungetc(ch, input);
-		printf("reading atom:");
+		INFODEPTH(depth, "ATOM :: ");
 		Cons* atom = readatom(input);
-		printf("%s\n", get(atom, sym));
+		INFOLN2("%s", get(atom, sym));
 		return atom;
 	}
 	}
@@ -145,20 +174,16 @@ print_aux(Cons *cons, int last)
 		if (!last) putchar(' ');
 		break;
 	case A_CELL: {
-		if (car(cons)) {
-			int islist = (car(cons)->type == A_CELL);
-			if (islist) printf("(");
-			print_aux(car(cons), !cdr(cons));
-			if (islist) {
-				printf(")");
-				if (cdr(cons)) putchar(' ');
-			}
+		if (islist(cons)) printf("(");
+		print_aux(car(cons), !cdr(cons));
+		if (islist(cons)) {
+			printf(")");
+			if (cdr(cons)) putchar(' ');
 		}
 		if (cdr(cons) && cdr(cons)->type == A_ATOM) {
 			fputs(". ", stdout);
-			last = 1;
-		} else last = 0;
-		print_aux(cdr(cons), last);
+		}
+		print_aux(cdr(cons), !!cdr(cons));
 	}}
 }
 
@@ -185,5 +210,5 @@ main(int argc, char *argv[])
 		printf("doesnt work file");
 		exit(1);
 	}
-	print(read(file));
+	print(read_(file, 0));
 }
