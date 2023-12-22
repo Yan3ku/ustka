@@ -21,60 +21,68 @@ typedef struct Cell {
 	struct Cons *cdr;
 } Cell;
 
+typedef enum {
+	A_CELL,
+	A_ATOM,
+} ConsType;
+
 struct Cons {
 	union {
 		Atom atom;
 		Cell cell;
 	} get;
-	enum {
-		A_CELL,
-		A_ATOM,
-	} type;
+	ConsType type;
 };
 
-inline static Cons *cdr(Cons *cons) { return cons->get.cell.cdr; }
-inline static Cons *car(Cons *cons) { return cons->get.cell.car; }
-inline static Cons *cadr(Cons *cons) { return car(cdr(cons)); }
-inline static Cons *cddr(Cons *cons) { return cdr(cdr(cons)); }
+/* macros allows being lvaues */
+#define cdr(cons)  ((cons)->get.cell.cdr)
+#define car(cons)  ((cons)->get.cell.car)
+#define cadr(cons) car(cdr(cons))
+#define cddr(cons) cdr(cdr(cons))
+#define get(cons, field) ((cons)->get.atom.get.field)
 
-static void readcons(FILE *input, Cell *cell); /* read construct conses */
+static void readcons(FILE *input, Cons **cons); /* read construct conses */
 static Cons *readatom(FILE *input);
 static Cons *read(FILE *input);			/* main entry to read */
 
+Cons *
+alloccons(ConsType type)
+{
+	Cons *cons = malloc(sizeof(Cons));
+	cons->type = type;
+	return cons;
+}
+
 void
-readcons(FILE *input, Cell *cell)
+readcons(FILE *input, Cons **cons)
 {
 	char ch;
        	while (isblank(ch = fgetc(input)) && ch != EOF);
 	if (feof(input)) return; /* todo: signal error */
 	switch (ch) {
-        case '(': {		/* not really sure what im suuposed to do with car */
+        case '(': {
 		printf("entering list\n");
-		cell->car = malloc(sizeof(Cons));
-		cell->cdr = malloc(sizeof(Cons));
-		cell->car->type = A_CELL;
-		readcons(input, &cell->car->get.cell);
-		readcons(input, &cell->cdr->get.cell);
+		(*cons) = alloccons(A_CELL);
+		readcons(input, &car(*cons));
+		readcons(input, &cdr(*cons));
 		break;
 	} case ')':
 		printf("closing list\n");
-		cell->car = cell->cdr = NULL;
+		(*cons) = NULL;
 		break;
 	default: {
 		ungetc(ch, input);
 		if (ch != '.') {
 			printf("reading atom: ");
+			(*cons) = alloccons(A_CELL);
 			Cons *atom = readatom(input);
-			printf("%s\n", atom->get.atom.get.sym);
-			cell->car = atom;
-			Cons *new = malloc(sizeof(Cons));
-			cell->cdr = new;
-			readcons(input, &cell->cdr->get.cell);
+			printf("%s\n", get(atom, sym));
+			car(*cons) = atom;
+			readcons(input, &cdr(*cons));
 		} else {
 			fgetc(input);
 			printf("reading cdr list:\n ");
-			cell->
-			cell->cdr = read(input);
+			*cons = read(input);
 			while (isblank(ch = fgetc(input)) && ch != EOF);
 			if (ch != ')') {
 				printf("error: expected )\n");
@@ -100,8 +108,7 @@ readsym(FILE *input, char *sym) {
 Cons *
 readatom(FILE *input)
 {
-	Cons *new = malloc(sizeof(Cons));
-	new->type = A_ATOM;
+	Cons *new = alloccons(A_ATOM);
 	readsym(input, new->get.atom.get.sym); /* for now the only atoms are symbols */
 	return new;
 }
@@ -114,16 +121,15 @@ read(FILE *input)
 	switch (ch) {
 	case '(': {
 		printf("entering list\n");
-		Cons *cons = malloc(sizeof(Cons));
-		cons->type = A_CELL;
-		readcons(input, &cons->get.cell);
+		Cons *cons = alloccons(A_CELL);
+		readcons(input, &cons);
 		return cons;
 	}
 	default:{
 		ungetc(ch, input);
 		printf("reading atom:");
 		Cons* atom = readatom(input);
-		printf("%s\n", atom->get.atom.get.sym);
+		printf("%s\n", get(atom, sym));
 		return atom;
 	}
 	}
@@ -135,17 +141,17 @@ print_aux(Cons *cons, int last)
 	if (!cons) return;
 	switch (cons->type) {
 	case A_ATOM:
-		fputs(cons->get.atom.get.sym, stdout);
+		fputs(get(cons, sym), stdout);
 		if (!last) putchar(' ');
 		break;
 	case A_CELL: {
 		if (car(cons)) {
 			int islist = (car(cons)->type == A_CELL);
 			if (islist) printf("(");
-			print_aux(car(cons), !cadr(cons));
+			print_aux(car(cons), !cdr(cons));
 			if (islist) {
 				printf(")");
-				if (cadr(cons)) putchar(' ');
+				if (cdr(cons)) putchar(' ');
 			}
 		}
 		if (cdr(cons) && cdr(cons)->type == A_ATOM) {
