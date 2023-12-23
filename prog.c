@@ -5,13 +5,20 @@
 
 #define SYM_LEN 24
 
+
+#define ATOM_TYPES(T) T##_SYMBOL, T##_KEYWORD, T##_STRING, T##_INTEGER, T##_FLOAT, \
+                      T##_REGEX, T##_CHAR, T##_BOOL, T##_VEC, T##_MAP, T##_SET
+
 typedef struct {
 	union {
 		char sym[SYM_LEN];
+		char *string;
+		int integer;
+		double floating;
+		char chr;
+		int bool;
 	} get;
-	enum {
-		A_SYMBOL,
-	} type;
+	enum { ATOM_TYPES(A) } type;
 } Atom;
 
 typedef struct Cons Cons;
@@ -26,6 +33,7 @@ typedef enum {
 	A_ATOM,
 } ConsType;
 
+
 struct Cons {
 	union {
 		Atom atom;
@@ -34,44 +42,60 @@ struct Cons {
 	ConsType type;
 };
 
-int loglevel = 1;
+typedef enum {
+	C_OK,
+	C_UNMATCHED_LPAREN,
+	C_DOT_FOLLOW,
+} ConsErr;
+
+typedef struct {
+	FILE *input;
+	size_t cursor;
+	ConsErr err;
+} Reader;
+
+typedef enum {
+	ATOM_TYPES(T),
+	T_LPAREN,
+	T_RPAREN,
+	T_RBRACKET,
+	T_LBRACKET,
+	T_QUOTE,
+	T_BSTICK,
+	T_HASH,
+} Token;
 
 /* macros allows being lvaues */
-#define cdr(c)  ((c)->get.cell.cdr)
+#define cdr(c)    ((c)->get.cell.cdr)
 #define car(c)    ((c)->get.cell.car)
 #define cadr(c)   car(cdr(c))
 #define cddr(c)   cdr(cdr(c))
 #define get(c, t) ((c)->get.atom.get.t)
-#define islist(c) (car(c)->type == A_CELL)
+#define listp(c)  ((c)->type == A_CELL)
+#define atomp(c)  ((c)->type == A_ATOM)
 
 
-/* show trace how read is parsing sexps */
-#define NDEBUG
-#ifdef NDEBUG
-#define LOC_() fprintf(stderr, "[%s@%-10s:%-3d] ", __FILE__, __func__, __LINE__)
-#define INFO2(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
-#define INFOLN2(...) do { INFO2(__VA_ARGS__); INFO2("\n"); } while (0)
-#define INFO(...)  do { LOC_(); INFO2(__VA_ARGS__) } while (0)
-#define INFOLN(...) do { INFO(__VA_ARGS__); INFO2("\n"); } while (0)
-#define INFODEPTH(depth, ...) do {					\
-		LOC_();                                                 \
-		for (int i = 0; i < depth; i++) fputc('>', stderr);	\
-		fputc(' ', stderr);					\
-		INFO2(__VA_ARGS__);                                     \
-} while (0)
-#define INFODEPTHLN(depth, ...) do { INFODEPTH(depth, __VA_ARGS__); INFO2("\n"); } while (0)
-#else
-#define INFO(...)
-#define INFOLN(...)
-#define INFODEPTH(...)
-#endif
+void
+reader_next()
+{
 
+}
 
+Token
+reader_peek()
+{
 
+}
 
-static void readcons(FILE *input, Cons **cons, int depth); /* read construct conses */
+Token
+reader_unget()
+{
+
+}
+
+static void readcons(FILE *input, Cons **cons); /* read construct conses */
 static Cons *readatom(FILE *input);
-static Cons *read_(FILE *input, int depth);			/* main entry to read */
+static Cons *read(FILE *input);			/* main entry to read */
 
 Cons *
 alloccons(ConsType type)
@@ -82,38 +106,33 @@ alloccons(ConsType type)
 }
 
 void
-readcons(FILE *input, Cons **cons, int depth)
+readcons(FILE *input, Cons **cons)
 {
 	char ch;
        	while (isblank(ch = fgetc(input)) && ch != EOF);
 	if (feof(input)) return; /* todo: signal error */
 	switch (ch) {
         case '(': {
-		INFODEPTHLN(depth, "OPENING");
 		(*cons) = alloccons(A_CELL);
-		readcons(input, &car(*cons), depth + 1);
-		readcons(input, &cdr(*cons), depth);
+		readcons(input, &car(*cons));
+		readcons(input, &cdr(*cons));
 		break;
 	} case ')':
-		INFODEPTHLN(depth, "CLOSING");
 		(*cons) = NULL;
 		break;
 	default: {
 		ungetc(ch, input);
 		if (ch != '.') {
-			INFODEPTH(depth, "ATOM :: ");
 			(*cons) = alloccons(A_CELL);
 			Cons *atom = readatom(input);
-			INFOLN2("%s", get(atom, sym));
 			car(*cons) = atom;
-			readcons(input, &cdr(*cons), depth);
+			readcons(input, &cdr(*cons));
 		} else {
-			INFODEPTHLN(depth, ":: DOT ::");
 			fgetc(input);
-			*cons = read_(input, depth);
+			*cons = read(input);
 			while (isblank(ch = fgetc(input)) && ch != EOF);
 			if (ch != ')') {
-				INFODEPTHLN(depth, "ERROR: expected left paren");
+				/* todo error */
 			}
 		}
 		break;
@@ -142,23 +161,19 @@ readatom(FILE *input)
 }
 
 Cons *
-read_(FILE *input, int depth)
+read(FILE *input)
 {
 	char ch;
 	while (isblank(ch = fgetc(input)) && ch != EOF);
 	switch (ch) {
 	case '(': {
-		INFODEPTHLN(depth, "OPENING");
 		Cons *cons = alloccons(A_CELL);
-		readcons(input, &cons, depth + 1);
-		INFODEPTHLN(depth, "CLOSING");
+		readcons(input, &cons);
 		return cons;
 	}
 	default:{
 		ungetc(ch, input);
-		INFODEPTH(depth, "ATOM :: ");
 		Cons* atom = readatom(input);
-		INFOLN2("%s", get(atom, sym));
 		return atom;
 	}
 	}
@@ -174,13 +189,13 @@ print_aux(Cons *cons, int last)
 		if (!last) putchar(' ');
 		break;
 	case A_CELL: {
-		if (islist(cons)) printf("(");
+		if (listp(car(cons))) printf("(");
 		print_aux(car(cons), !cdr(cons));
-		if (islist(cons)) {
+		if (listp(car(cons))) {
 			printf(")");
 			if (cdr(cons)) putchar(' ');
 		}
-		if (cdr(cons) && cdr(cons)->type == A_ATOM) {
+		if (cdr(cons) && atomp(cdr(cons))) {
 			fputs(". ", stdout);
 		}
 		print_aux(cdr(cons), !!cdr(cons));
@@ -210,5 +225,5 @@ main(int argc, char *argv[])
 		printf("doesnt work file");
 		exit(1);
 	}
-	print(read_(file, 0));
+	print(read(file));
 }
