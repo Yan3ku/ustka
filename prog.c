@@ -2,6 +2,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #define SYM_LEN 24
 
@@ -17,29 +18,29 @@ typedef struct {
 		double floating;
 		char chr;
 		int bool;
-	} get;
+	} as;
 	enum { ATOM_TYPES(A) } type;
 } Atom;
 
-typedef struct Cons Cons;
+typedef struct Cell Cell;
 
-typedef struct Cell {
-	struct Cons *car;
-	struct Cons *cdr;
-} Cell;
+typedef struct Cons {
+	struct Cell *car;
+	struct Cell *cdr;
+} Cons;
 
 typedef enum {
-	A_CELL,
+	A_CONS,
 	A_ATOM,
-} ConsType;
+} CellType;
 
 
-struct Cons {
+struct Cell {
 	union {
 		Atom atom;
-		Cell cell;
-	} get;
-	ConsType type;
+		Cons cons;
+	} as;
+	CellType type;
 };
 
 typedef enum {
@@ -66,13 +67,14 @@ typedef enum {
 } Token;
 
 /* macros allows being lvaues */
-#define cdr(c)    ((c)->get.cell.cdr)
-#define car(c)    ((c)->get.cell.car)
-#define cadr(c)   car(cdr(c))
-#define cddr(c)   cdr(cdr(c))
-#define get(c, t) ((c)->get.atom.get.t)
-#define listp(c)  ((c)->type == A_CELL)
-#define atomp(c)  ((c)->type == A_ATOM)
+#define cdr(c)       ((c)->as.cons.cdr)
+#define car(c)       ((c)->as.cons.car)
+#define cadr(c)      car(cdr(c))
+#define cddr(c)      cdr(cdr(c))
+#define consp(c)     ((c)->type == A_CONS)
+#define atomp(c)     ((c)->type == A_ATOM)
+#define asatom(c, t) ((c)->as.atom.as.t)
+
 
 
 void
@@ -93,43 +95,43 @@ reader_unget()
 
 }
 
-static void readcons(FILE *input, Cons **cons); /* read construct conses */
-static Cons *readatom(FILE *input);
-static Cons *read(FILE *input);			/* main entry to read */
+static void readcells(FILE *input, Cell **cell); /* read construct conses */
+static Cell *readatom(FILE *input);
+static Cell *read(FILE *input);			/* main entry to read */
 
-Cons *
-alloccons(ConsType type)
+Cell *
+alloccell(CellType type)
 {
-	Cons *cons = malloc(sizeof(Cons));
-	cons->type = type;
-	return cons;
+	Cell *cell = malloc(sizeof(Cell));
+	cell->type = type;
+	return cell;
 }
 
 void
-readcons(FILE *input, Cons **cons)
+readcells(FILE *input, Cell **cell)
 {
 	char ch;
        	while (isblank(ch = fgetc(input)) && ch != EOF);
 	if (feof(input)) return; /* todo: signal error */
 	switch (ch) {
         case '(': {
-		(*cons) = alloccons(A_CELL);
-		readcons(input, &car(*cons));
-		readcons(input, &cdr(*cons));
+		(*cell) = alloccell(A_CONS);
+		readcells(input, &car(*cell));
+		readcells(input, &cdr(*cell));
 		break;
 	} case ')':
-		(*cons) = NULL;
+		(*cell) = NULL;
 		break;
 	default: {
 		ungetc(ch, input);
 		if (ch != '.') {
-			(*cons) = alloccons(A_CELL);
-			Cons *atom = readatom(input);
-			car(*cons) = atom;
-			readcons(input, &cdr(*cons));
+			(*cell) = alloccell(A_CONS);
+			Cell *atom = readatom(input);
+			car(*cell) = atom;
+			readcells(input, &cdr(*cell));
 		} else {
 			fgetc(input);
-			*cons = read(input);
+			*cell = read(input);
 			while (isblank(ch = fgetc(input)) && ch != EOF);
 			if (ch != ')') {
 				/* todo error */
@@ -152,67 +154,67 @@ readsym(FILE *input, char *sym) {
 	ungetc(ch, input);
 }
 
-Cons *
+Cell *
 readatom(FILE *input)
 {
-	Cons *new = alloccons(A_ATOM);
-	readsym(input, new->get.atom.get.sym); /* for now the only atoms are symbols */
+	Cell *new = alloccell(A_ATOM);
+	readsym(input, asatom(new, sym)); /* for now the only atoms are symbols */
 	return new;
 }
 
-Cons *
+Cell *
 read(FILE *input)
 {
 	char ch;
 	while (isblank(ch = fgetc(input)) && ch != EOF);
 	switch (ch) {
 	case '(': {
-		Cons *cons = alloccons(A_CELL);
-		readcons(input, &cons);
-		return cons;
+		Cell *cell = alloccell(A_CONS);
+		readcells(input, &cell);
+		return cell;
 	}
 	default:{
 		ungetc(ch, input);
-		Cons* atom = readatom(input);
+		Cell* atom = readatom(input);
 		return atom;
 	}
 	}
 }
 
 void
-print_aux(Cons *cons, int last)
+print_aux(Cell *cell, int last)
 {
-	if (!cons) return;
-	switch (cons->type) {
+	if (!cell) return;
+	switch (cell->type) {
 	case A_ATOM:
-		fputs(get(cons, sym), stdout);
+		fputs(asatom(cell, sym), stdout);
 		if (!last) putchar(' ');
 		break;
-	case A_CELL: {
-		if (listp(car(cons))) printf("(");
-		print_aux(car(cons), !cdr(cons));
-		if (listp(car(cons))) {
+	case A_CONS: {
+		if (consp(car(cell))) printf("(");
+		print_aux(car(cell), !cdr(cell));
+		if (consp(car(cell))) {
 			printf(")");
-			if (cdr(cons)) putchar(' ');
+			if (cdr(cell)) putchar(' ');
 		}
-		if (cdr(cons) && atomp(cdr(cons))) {
+		if (cdr(cell) && atomp(cdr(cell))) {
 			fputs(". ", stdout);
 		}
-		print_aux(cdr(cons), !!cdr(cons));
+		print_aux(cdr(cell), !!cdr(cell));
 	}}
 }
 
 void
-print(Cons *cons) {
-	if (!cons) return;
-	switch (cons->type) {
-	case A_CELL:
+print(Cell *cell) {
+	if (!cell) return;
+	switch (cell->type) {
+	case A_CONS:
 		putchar('(');
-		print_aux(cons, 0);
+		print_aux(cell, 0);
 		putchar(')');
 		break;
 	case A_ATOM:
-		print_aux(cons, 0);
+		print_aux(cell, 0);
 	}
 }
 
