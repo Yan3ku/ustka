@@ -27,12 +27,9 @@ typedef union {
 #define FALSE_VALUE (BOOL_MASK | 2)    /* 0b*10 */
 
 #define INT_MASK    0x7ffc000000000000 /* use all of mantisa bits for integer */
-#define VEC_MASK    0xfffc000000000000 /* pointers have sign bit set */
+#define SYM_MASK    0xfffc000000000000 /* pointers have sign bit set */
 #define STR_MASK    0xfffe000000000000 /* on x86-64 ptr* is at max 48 bits long */
-#define MAP_MASK    0xfffd000000000000
-#define SET_MASK    0xffff000000000000
-/* Alternatively create general object pointer with it's own tag */
-/* #define OBJ_MASK    0xffc000000000000 */
+#define OBJ_MASK    0xfffd000000000000
 
 /* predicates */
 #define DOUBLP(v) ((v.as_uint & NANISH) != NANISH)
@@ -40,9 +37,8 @@ typedef union {
 #define BOOLP(v)  ((v.as_uint & BOOL_MASK) == BOOL_MASK)
 #define INTP(v)   ((v.as_uint & NANISH_MASK) == INT_MASK)
 #define STRP(v)   ((v.as_uint & NANISH_MASK) == STR_MASK)
-#define VECP(v)   ((v.as_uint & NANISH_MASK) == VEC_MASK)
-#define SETP(v)   ((v.as_uint & NANISH_MASK) == SET_MASK)
-#define MAPP(v)   ((v.as_uint & NANISH_MASK) == MAP_MASK)
+#define SYMP(v)   ((v.as_uint & NANISH_MASK) == SYM_MASK)
+#define OBJP(v)   ((v.as_uint & NANISH_MASK) == BOJ_MASK)
 
 /* dereference value */
 #define AS_DOUBL(v) (v.as_double)
@@ -53,6 +49,7 @@ typedef union {
 /* add tag mask to malloced pointer */
 #define TO_VEC(p) ((uint64_t)(p) | VEC_MASK)
 #define TO_STR(p) ((uint64_t)(p) | STR_MASK)
+#define TO_SYM(p) ((uint64_t)(p) | SYM_MASK)
 #define TO_MAP(p) ((uint64_t)(p) | MAP_MASK)
 #define TO_SET(p) ((uint64_t)(p) | SET_MASK)
 #define TO_INT(i) ((uint64_t)(i) | INT_MASK)
@@ -165,7 +162,7 @@ reader_next(Reader *reader)
 {
 	char chr;
 	ReadErr err = OK;
-	while (isblank(chr = fgetc(reader->input)) && chr != EOF);
+	while (isspace(chr = fgetc(reader->input)) && chr != EOF);
 	switch (chr) {
 	case EOF:  err = EOF_ERR; goto ERR;
 	case ')':  reader->tok.type = T_RPAREN; goto OK;
@@ -255,7 +252,7 @@ readcells(Reader *reader, Cell **cell)
 		printf("T_SYM readcells\n");
 		*cell = alloccell(A_CONS);
 		car(*cell) = alloccell(A_ATOM);
-		as_atom(car(*cell)).as_uint = TO_STR(reader->tok.as.string);
+		as_atom(car(*cell)).as_uint = TO_SYM(reader->tok.as.string);
 		printf("%s\n", AS_PTR(as_atom(car(*cell))));
 		ERR(readcells(reader, &cdr(*cell)));
 		return OK;
