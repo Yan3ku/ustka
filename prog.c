@@ -6,9 +6,8 @@
 #include <math.h>
 #include "vec.h"
 
-#define SYM_LEN 24
-
-/* -- NAN Boxing --
+
+/* -- NAN BOXING --
    double is: [sign] 11*[exponent] 52*[mantisa] = 64 bits
    NAN is all exponent bits set + most significat bit in mantysa
    NAN = 0x7ff8000000000000
@@ -30,11 +29,13 @@ typedef union {
 #define SYM_MASK    0xfffc000000000000 /* pointers have sign bit set */
 #define STR_MASK    0xfffe000000000000 /* on x86-64 ptr* is at max 48 bits long */
 #define OBJ_MASK    0xfffd000000000000
+#define PTR_MASK    0xf000000000000000
 
 /* predicates */
 #define DOUBLP(v) ((v.as_uint & NANISH) != NANISH)
 #define NULLP(v)  ((v.as_uint == NULL_VALUE)
 #define BOOLP(v)  ((v.as_uint & BOOL_MASK) == BOOL_MASK)
+#define PTRP(v)   ((v.as_uint & PTR_MASK) == PTR_MASK)
 #define INTP(v)   ((v.as_uint & NANISH_MASK) == INT_MASK)
 #define STRP(v)   ((v.as_uint & NANISH_MASK) == STR_MASK)
 #define SYMP(v)   ((v.as_uint & NANISH_MASK) == SYM_MASK)
@@ -54,8 +55,8 @@ typedef union {
 #define TO_SET(p) ((uint64_t)(p) | SET_MASK)
 #define TO_INT(i) ((uint64_t)(i) | INT_MASK)
 
-
-/* -- Cons Cells --
+
+/* -- CONS CELLS --
    Cell is holding either the Atom or Cons (construction)
    Cons is link between Cells.
 */
@@ -90,6 +91,7 @@ struct Cell {
 #define as_atom(c)   (((c)->as.atom))
 
 
+
 /* -- TOKENIZER -- */
 typedef enum {
 	OK,
@@ -107,20 +109,6 @@ const char *READ_ERR2STR[] = {
 
 #define ERR(expr) do { ReadErr err; if ((err = (expr))) return err; } while (0)
 
-typedef enum {
-	T_LPAREN,
-	T_RPAREN,
-	T_RBRACKET,
-	T_LBRACKET,
-	T_HASH,
-	T_DOT,
-	T_QUOTE,
-	T_BSTICK,
-	T_SYMBOL,
-	T_STRING,
-	T_DOUBLE,
-	T_INTEGER,
-} TokenType;
 
 typedef struct {
 	union {
@@ -128,7 +116,20 @@ typedef struct {
 		double doubl;
 		int integer;
 	} as;
-	TokenType type;
+	enum {
+		T_LPAREN,
+		T_RPAREN,
+		T_RBRACKET,
+		T_LBRACKET,
+		T_HASH,
+		T_DOT,
+		T_QUOTE,
+		T_BSTICK,
+		T_SYMBOL,
+		T_STRING,
+		T_DOUBLE,
+		T_INTEGER,
+	} type;
 } Token;
 
 typedef struct {
@@ -171,7 +172,7 @@ reader_next(Reader *reader)
         case '`':  reader->tok.type = T_BSTICK; goto OK;
         case '.':  reader->tok.type = T_DOT;    goto OK;
         case '#':  reader->tok.type = T_HASH;   goto OK;
-	case '"': {
+	case '"': {		/* todo: test string */
 		int esc = 0;
 		Vec(char) str;
 		reader->tok.type = T_STRING;
@@ -190,7 +191,7 @@ reader_next(Reader *reader)
 		reader->tok.as.string = strdup(str);
 		vec_free(str);
 		goto OK;
-	} default:
+	} default:		/* todo: add numbers */
 		ungetc(chr, reader->input);
 		reader->tok.type = T_SYMBOL;
 		Vec(char) str;
@@ -212,6 +213,7 @@ OK:
 	return OK;
 }
 
+
 /* -- READ SEXP -- */
 static ReadErr readcells(Reader *reader, Cell **cell); /* read construct cells */
 static Cell *read(Reader *reader);                     /* main entry to read */
@@ -224,8 +226,22 @@ alloccell(CellType type)
 	return cell;
 }
 
+void
+freecell(Cell *cell) {
+	if (!cell) return;
+	switch (cell->type) {
+	case A_CONS:
+		freecell(car(cell));
+		freecell(cdr(cell));
+		break;
+	case A_ATOM:
+		if (PTRP(as_atom(cell))) free(AS_PTR(as_atom(cell)));
+	}
+	free(cell);
+}
+
 ReadErr
-readcells(Reader *reader, Cell **cell)
+readcells(Reader *reader, Cell **cell) /* todo: implement objects and special symbols */
 {
 	ERR(reader_next(reader));
 	switch (reader->tok.type) {
@@ -256,7 +272,8 @@ readcells(Reader *reader, Cell **cell)
 		printf("%s\n", AS_PTR(as_atom(car(*cell))));
 		ERR(readcells(reader, &cdr(*cell)));
 		return OK;
-	}}
+	}
+	}
 }
 
 
@@ -264,10 +281,10 @@ Cell *
 read(Reader *reader)
 {
         if (reader_next(reader)) return NULL;
-	switch (reader->tok.type) {
+	switch (reader->tok.type) { /* todo: handle all cases */
 	case T_LPAREN: {
 		fprintf(stderr, "T_LPAREN read\n");
-		Cell *cell = alloccell(A_CONS);
+		Cell *cell;
 		readcells(reader, &cell);
 		return cell;
 	}
@@ -282,8 +299,12 @@ read(Reader *reader)
 		reader->err = UNMATCHED_RPAREN_ERR;
 		return NULL;
 	}
+	return NULL;
 }
 
+
+
+/* -- PRINTER -- */
 void
 print_aux(Cell *cell, int last)
 {
@@ -304,7 +325,8 @@ print_aux(Cell *cell, int last)
 			fputs(". ", stdout);
 		}
 		print_aux(cdr(cell), !!cdr(cell));
-	}}
+	}
+	}
 }
 
 void
@@ -333,8 +355,11 @@ main(int argc, char *argv[])
 	}
 	#endif
 	Reader *reader;
-	print(read(reader = reader_make(stdin)));
+	Cell *cell;
+	print(cell = read(reader = reader_make(stdin)));
+	freecell(cell);
 	if (reader->err) {
 		puts(READ_ERR2STR[reader->err]);
 	}
+	free(reader);
 }
