@@ -4,62 +4,30 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
+#include <assert.h>
 #include "vec.h"
-
-
-/* -- NAN BOXING --
-   double is: [sign] 11*[exponent] 52*[mantisa] = 64 bits
-   NAN is all exponent bits set + most significat bit in mantysa
-   NAN = 0x7ff8000000000000
-   the trick is to use the free NAN bits for storing different values */
-typedef union {
-	uint64_t as_uint;
-	double as_double;
-} Atom;				/* 8 bytes long total */
-
-#define NANISH      0x7ffc000000000000 /* distinguish "our" NAN with one additional bit */
-#define NANISH_MASK 0xffff000000000000 /* [SIGN/PTR_TAG] + 11*[EXP] + 2*[NANISH] + 2*[TAG] */
-
-#define BOOL_MASK   0x7ffe000000000002 /* 2 ms + and 2 ls */
-#define NULL_VALUE  0x7ffe000000000000 /* 0b*00 */
-#define TRUE_VALUE  (BOOL_MASK | 3)    /* 0b*11 */
-#define FALSE_VALUE (BOOL_MASK | 2)    /* 0b*10 */
-
-#define INT_MASK    0x7ffc000000000000 /* use all of mantisa bits for integer */
-#define SYM_MASK    0xfffc000000000000 /* pointers have sign bit set */
-#define STR_MASK    0xfffe000000000000 /* on x86-64 ptr* is at max 48 bits long */
-#define OBJ_MASK    0xfffd000000000000
-#define PTR_MASK    0xf000000000000000
-
-/* predicates */
-#define DOUBLP(v) ((v.as_uint & NANISH) != NANISH)
-#define NULLP(v)  ((v.as_uint == NULL_VALUE)
-#define BOOLP(v)  ((v.as_uint & BOOL_MASK) == BOOL_MASK)
-#define PTRP(v)   ((v.as_uint & PTR_MASK) == PTR_MASK)
-#define INTP(v)   ((v.as_uint & NANISH_MASK) == INT_MASK)
-#define STRP(v)   ((v.as_uint & NANISH_MASK) == STR_MASK)
-#define SYMP(v)   ((v.as_uint & NANISH_MASK) == SYM_MASK)
-#define OBJP(v)   ((v.as_uint & NANISH_MASK) == BOJ_MASK)
-
-/* dereference value */
-#define AS_DOUBL(v) (v.as_double)
-#define AS_BOOL(v)  ((char)(v.as_uint & 0x1))
-#define AS_INT(v)   ((int32_t)(v.as_uint))
-#define AS_PTR(v)   ((char*)((v).as_uint & 0xFFFFFFFFFFFF))
-
-/* add tag mask to malloced pointer */
-#define TO_VEC(p) ((uint64_t)(p) | VEC_MASK)
-#define TO_STR(p) ((uint64_t)(p) | STR_MASK)
-#define TO_SYM(p) ((uint64_t)(p) | SYM_MASK)
-#define TO_MAP(p) ((uint64_t)(p) | MAP_MASK)
-#define TO_SET(p) ((uint64_t)(p) | SET_MASK)
-#define TO_INT(i) ((uint64_t)(i) | INT_MASK)
 
 
 /* -- CONS CELLS --
    Cell is holding either the Atom or Cons (construction)
    Cons is link between Cells.
 */
+#define nil (void *)0
+
+typedef struct {
+	enum {
+		A_SYMBOL,
+		A_STRING,
+		A_DOUBLE,
+		A_INTEGER,
+	} type;
+	union {
+		char *string;
+		double doubl;
+		int integer;
+	} as;
+} Atom;
+
 typedef struct Cell Cell;
 
 typedef struct Cons {
@@ -80,37 +48,48 @@ struct Cell {
 	CellType type;
 };
 
-/* macros allows being lvaues */
 #define cdr(c)       ((c)->as.cons.cdr)
 #define car(c)       ((c)->as.cons.car)
 #define cadr(c)      car(cdr(c))
 #define cddr(c)      cdr(cdr(c))
 #define consp(c)     ((c)->type == A_CONS)
 #define atomp(c)     ((c)->type == A_ATOM)
-#define as_cons(c)   ((c)->as.cons)
-#define as_atom(c)   (((c)->as.atom))
+#define nilp(c)      (!(c))
+#define lisp(c)      (nilp(c) || consp(c))
 
+#define consof(c)    ((c)->as.cons)
+#define atomof(c)    ((c)->as.atom)
+
+#define intp(c)      (atomp(c) && atomof(c).type == A_INTEGER)
+#define doublep(c)   (atomp(c) && atomof(c).type == A_DOUBLE)
+#define strp(c)      (atomp(c) && atomof(c).type == A_STRING)
+#define symp(c)      (atomp(c) && atomof(c).type == A_SYMBOL)
+
+#define intof(c)     (atomof(c).as.integer)
+#define doublof(c)   (atomof(c).as.doubl)
+#define symof(c)     (atomof(c).as.string)
+#define strof(c)     (atomof(c).as.string)
 
 
 /* -- TOKENIZER -- */
 typedef enum {
 	OK,
-	UNMATCHED_RPAREN_ERR,
-	DOT_FOLLOW_ERR,
 	EOF_ERR,
+	DOT_FOLLOW_ERR,
+	TO_MANY_DOTS_ERR,
+	UNMATCHED_RPAREN_ERR,
 } ReadErr;
 
 const char *READ_ERR2STR[] = {
-	[OK] = "OK",
-	[UNMATCHED_RPAREN_ERR] = "unmatched )",
-	[DOT_FOLLOW_ERR] = "more than one object follows . in list",
-	[EOF_ERR] = "unexpected end of file",
+	[OK]                   = "OK",
+	[EOF_ERR]              = "unexpected end of file",
+	[DOT_FOLLOW_ERR]       = "more than one object follows . in list",
+	[TO_MANY_DOTS_ERR]     = "to many dots",
+	[UNMATCHED_RPAREN_ERR] = "unmatched close parenthesis",
 };
 
-#define ERR(expr) do { ReadErr err; if ((err = (expr))) return err; } while (0)
-
-
 typedef struct {
+	int heapval;
 	union {
 		char *string;
 		double doubl;
@@ -134,12 +113,9 @@ typedef struct {
 
 typedef struct {
 	FILE *input;
-	FILE *trace;
 	size_t cursor;
 	Token tok;
-	Token unget;
 	ReadErr err;
-	int dounget;
 } Reader;
 
 
@@ -162,55 +138,71 @@ ReadErr
 reader_next(Reader *reader)
 {
 	char chr;
-	ReadErr err = OK;
+	reader->tok.heapval = 0;
+	reader->err = OK;
 	while (isspace(chr = fgetc(reader->input)) && chr != EOF);
 	switch (chr) {
-	case EOF:  err = EOF_ERR; goto ERR;
-	case ')':  reader->tok.type = T_RPAREN; goto OK;
-        case '(':  reader->tok.type = T_LPAREN; goto OK;
-        case '\'': reader->tok.type = T_QUOTE;  goto OK;
-        case '`':  reader->tok.type = T_BSTICK; goto OK;
-        case '.':  reader->tok.type = T_DOT;    goto OK;
-        case '#':  reader->tok.type = T_HASH;   goto OK;
+	case EOF:  reader->err = EOF_ERR;         return reader->err;
+	case ')':  reader->tok.type = T_RPAREN;   return OK;
+        case '(':  reader->tok.type = T_LPAREN;   return OK;
+	case '[':  reader->tok.type = T_RBRACKET; return OK;
+        case ']':  reader->tok.type = T_LBRACKET; return OK;
+        case '\'': reader->tok.type = T_QUOTE;    return OK;
+        case '`':  reader->tok.type = T_BSTICK;   return OK;
+        case '.':  reader->tok.type = T_DOT;      return OK;
+        case '#':  reader->tok.type = T_HASH;     return OK;
 	case '"': {		/* todo: test string */
 		int esc = 0;
 		Vec(char) str;
 		reader->tok.type = T_STRING;
 		vec_ini(str);
 		while ((chr = fgetc(reader->input)) != EOF) {
-			if (chr == '\\' && !esc) break;
-			esc = (chr == '\\');
+			if (esc) {
+				esc = 0;
+				switch (chr) {
+				case '\\': vec_push(str, chr); continue;
+				case '"': vec_push(str, chr);  continue;
+				case 'n': vec_push(str, '\n'); continue;
+				case 't': vec_push(str, '\t'); continue;
+				}
+			} else if (chr == '"') break;
+			if ((esc = (chr == '\\'))) continue;
 			vec_push(str, chr);
 		}
 		if (chr == EOF) {
 			vec_free(str);
-			err = EOF_ERR;
-			goto ERR;
+			reader->err = EOF_ERR;
+			return reader->err;
 		}
 		vec_push(str, '\0');
+		reader->tok.heapval = 1;
 		reader->tok.as.string = strdup(str);
 		vec_free(str);
-		goto OK;
-	} default:		/* todo: add numbers */
+		return OK;
+	} default: {		/* todo: add double */
 		ungetc(chr, reader->input);
-		reader->tok.type = T_SYMBOL;
 		Vec(char) str;
 		vec_ini(str);
+		char *endptr = str;
 		while (((chr = fgetc(reader->input)) != EOF) && !reader_isterm(chr)) {
 			vec_push(str, chr);
 		}
 		ungetc(chr, reader->input);
 		vec_push(str, '\0');
+		reader->tok.as.integer = strtol(str, &endptr, 10);
+		if (*endptr == '\0') {
+			vec_free(str);
+			reader->tok.type = T_INTEGER;
+			return OK;
+
+		}
+		reader->tok.type = T_SYMBOL;
 		reader->tok.as.string = strdup(str);
+		reader->tok.heapval = 1;
 		vec_free(str);
-		goto OK;
+		return OK;
 	}
-ERR:
-	reader->err = err;
-	return err;
-OK:
-	reader->err = OK;
-	return OK;
+	}
 }
 
 
@@ -219,87 +211,148 @@ static ReadErr readcells(Reader *reader, Cell **cell); /* read construct cells *
 static Cell *read(Reader *reader);                     /* main entry to read */
 
 Cell *
-alloccell(CellType type)
+cellalloc(CellType type)
 {
 	Cell *cell = malloc(sizeof(Cell));
 	cell->type = type;
+	if (type == A_CONS) car(cell) = cdr(cell) = nil;
 	return cell;
 }
 
+Cell *
+cellcopy(Cell *cell)
+{
+	Cell *copy = malloc(sizeof(Cell));
+	memcpy(copy, cell, sizeof(Cell));
+	if (!intp(cell) && ((strp(cell)) || symp(cell))) {
+		strof(copy) = malloc(strlen(strof(cell)) + 1);
+		strcpy(strof(copy), strof(cell));
+	}
+	return copy;
+}
+
 void
-freecell(Cell *cell) {
-	if (!cell) return;
-	switch (cell->type) {
+freecell(Cell **cell) {
+	if (nilp(*cell)) return;
+	switch ((*cell)->type) {
 	case A_CONS:
-		freecell(car(cell));
-		freecell(cdr(cell));
+		freecell(&car(*cell));
+		freecell(&cdr(*cell));
 		break;
 	case A_ATOM:
-		if (PTRP(as_atom(cell))) free(AS_PTR(as_atom(cell)));
+		if (strp(*cell) || symp(*cell)) free(strof(*cell));
 	}
-	free(cell);
+	free(*cell);
+	*cell = nil;
 }
 
 ReadErr
-readcells(Reader *reader, Cell **cell) /* todo: implement objects and special symbols */
+readcells(Reader *reader, Cell **cell) /* todo: implement all tokens */
 {
-	ERR(reader_next(reader));
+	ReadErr err;
+	if ((err = reader_next(reader))) return err;
 	switch (reader->tok.type) {
         case T_LPAREN: {
-		printf("T_LAPREN readcells\n");
-		*cell = alloccell(A_CONS);
-	        ERR(readcells(reader, &car(*cell)));
-		ERR(readcells(reader, &cdr(*cell)));
+		fprintf(stderr, "T_LAPREN readcells\n");
+		*cell = cellalloc(A_CONS);
+	        if ((err = readcells(reader, &car(*cell)))) goto exit;
+		if ((err = readcells(reader, &cdr(*cell)))) goto exit;
 		return OK;
 	} case T_RPAREN:
-		printf("T_PAREN readcells\n");
-		*cell = NULL;
+		fprintf(stderr, "T_PAREN readcells\n");
+		*cell = nil;
 		return OK;
 	case T_DOT:
-		printf("T_DOT readcells\n");
-		*cell = read(reader);
-		ERR(reader_next(reader));
+		fprintf(stderr, "T_DOT readcells\n");
+		if (!(*cell = read(reader))) return reader->err;
+		if ((err = reader_next(reader))) goto exit;
 		if (reader->tok.type != T_RPAREN) {
+			if (reader->tok.heapval) free(reader->tok.as.string);
 			reader->err = DOT_FOLLOW_ERR;
 			return DOT_FOLLOW_ERR;
 		}
 		return OK;
-	default: {
-		printf("T_SYM readcells\n");
-		*cell = alloccell(A_CONS);
-		car(*cell) = alloccell(A_ATOM);
-		as_atom(car(*cell)).as_uint = TO_SYM(reader->tok.as.string);
-		printf("%s\n", AS_PTR(as_atom(car(*cell))));
-		ERR(readcells(reader, &cdr(*cell)));
+	case T_INTEGER: {
+		fprintf(stderr, "T_INTEGER readcells\n");
+		*cell = cellalloc(A_CONS);
+		car(*cell) = cellalloc(A_ATOM);
+		intof(car(*cell)) = reader->tok.as.integer;
+		atomof(car(*cell)).type = A_INTEGER;
+		if ((err = readcells(reader, &cdr(*cell)))) goto exit;
+		return OK;
+	}
+	case T_SYMBOL: {
+		fprintf(stderr, "T_SYM readcells\n");
+		*cell = cellalloc(A_CONS);
+		car(*cell) = cellalloc(A_ATOM);
+		strof(car(*cell)) = reader->tok.as.string;
+		atomof(car(*cell)).type = A_SYMBOL;
+		fprintf(stderr, "%s\n", strof(car(*cell)));
+		if ((err = readcells(reader, &cdr(*cell)))) goto exit;
+		return OK;
+	}
+	case T_STRING: {
+		fprintf(stderr, "T_SYM readcells\n");
+		*cell = cellalloc(A_CONS);
+		car(*cell) = cellalloc(A_ATOM);
+		strof(car(*cell)) = reader->tok.as.string;
+		atomof(car(*cell)).type = A_STRING;
+		fprintf(stderr, "%s\n", strof(car(*cell)));
+		if ((err = readcells(reader, &cdr(*cell)))) goto exit;
 		return OK;
 	}
 	}
+exit:
+	freecell(cell);
+	*cell = nil;
+	return err;
 }
 
 
 Cell *
 read(Reader *reader)
 {
-        if (reader_next(reader)) return NULL;
+	Cell *cell;
+        if (reader_next(reader)) return nil;
 	switch (reader->tok.type) { /* todo: handle all cases */
 	case T_LPAREN: {
 		fprintf(stderr, "T_LPAREN read\n");
-		Cell *cell;
+		cell = nil;
 		readcells(reader, &cell);
 		return cell;
 	}
-	case T_SYMBOL:
-	case T_STRING: {
-		fprintf(stderr, "T_ATOM read\n");
-		Cell* cell = alloccell(A_ATOM);
-		as_atom(cell).as_uint = TO_STR(reader->tok.as.string);
+	case T_SYMBOL: {
+		fprintf(stderr, "T_SYM read\n");
+		cell = cellalloc(A_ATOM);
+		symof(cell) = reader->tok.as.string;
+		atomof(cell).type = A_SYMBOL;
 		return cell;
 	}
-	case T_RPAREN:
-		reader->err = UNMATCHED_RPAREN_ERR;
-		return NULL;
+	case T_STRING: {
+		fprintf(stderr, "T_STRING read\n");
+		cell = cellalloc(A_ATOM);
+		strof(cell) = reader->tok.as.string;
+		atomof(cell).type = A_STRING;
+		return cell;
 	}
-	return NULL;
+	case T_INTEGER: {
+		fprintf(stderr, "T_INTEGER number\n");
+		cell = cellalloc(A_ATOM);
+		intof(cell) = reader->tok.as.integer;
+		atomof(cell).type = A_INTEGER;
+		return cell;
+	}
+	case T_DOUBLE: {
+		fprintf(stderr, "T_DOUBL number\n");
+		cell = cellalloc(A_ATOM);
+		doublof(cell) = reader->tok.as.doubl;
+		atomof(cell).type = A_DOUBLE;
+		return cell;
+	}
+	case T_RPAREN: reader->err = UNMATCHED_RPAREN_ERR; return nil;
+	case T_DOT:    reader->err = TO_MANY_DOTS_ERR;     return nil;
+	default: return nil;
+	}
 }
 
 
@@ -311,7 +364,17 @@ print_aux(Cell *cell, int last)
 	if (!cell) return;
 	switch (cell->type) {
 	case A_ATOM:
-		fputs(AS_PTR(as_atom(cell)), stdout);
+		if (strp(cell)) {
+			putchar('"');
+		}
+		if (strp(cell) || symp(cell))
+			fputs(strof(cell), stdout);
+		else if (intp(cell))
+			printf("%d", intof(cell));
+		else fprintf(stderr, "print_aux: type not recognized");
+		if (strp(cell)) {
+			putchar('"');
+		}
 		if (!last) putchar(' ');
 		break;
 	case A_CONS: {
@@ -331,7 +394,7 @@ print_aux(Cell *cell, int last)
 
 void
 print(Cell *cell) {
-	if (!cell) return;
+	if (nilp(cell)) return;
 	switch (cell->type) {
 	case A_CONS:
 		putchar('(');
@@ -343,9 +406,68 @@ print(Cell *cell) {
 	}
 }
 
+
+/* -- EVAL -- */
+int
+add(Cell *cell)			/* todo: errors */
+{
+	int acc = 0;
+	while  (!nilp(cell)) {
+		if (!intp(car(cell))) {
+			fprintf(stderr, "add: intp error");
+			return 0;
+		} else if (!lisp(cdr(cell))) {
+			fprintf(stderr, "add: lisp error");
+			return 0;
+		}
+		acc += intof(car(cell));
+		cell = cdr(cell);
+	}
+	return acc;
+}
+
+Cell *eval(Cell *cell);
+
+
+Cell *
+eval_cdr(Cell *cell)
+{
+	if (nilp(cell)) return nil;
+	if (atomp(cell)) return cellcopy(cell);
+	assert(consp(cell));
+	Cell *ret = cellalloc(A_CONS);
+	car(ret) = eval(car(cell));
+	cdr(ret) = eval_cdr(cdr(cell));
+	return ret;
+}
+
+Cell *
+eval(Cell *cell)		/* eval car */
+{
+	if (nilp(cell))  return nil; /* fix memory */
+	if (atomp(cell)) return cellcopy(cell);
+	assert(consp(cell));
+	Cell *hd = eval(car(cell));
+	if (!nilp(hd) && symp(hd)) {
+		if (strcmp(symof(hd), "+") == 0) {
+			freecell(&hd);
+			Cell *ret = cellalloc(A_ATOM);
+			Cell *tl = eval_cdr(cdr(cell));
+			intof(ret) = add(tl);
+			atomof(ret).type = A_INTEGER;
+			freecell(&tl);
+			return ret;
+		}
+	}
+	fprintf(stderr, "illegal function call\n");
+	freecell(&hd);
+	return nil;
+}
+
 int
 main(int argc, char *argv[])
 {
+	(void)argc, (void)argv;
 	#if 0
 	FILE *file = fopen(argv[1], "r");
 	char ch[SYM_LEN];
@@ -355,11 +477,14 @@ main(int argc, char *argv[])
 	}
 	#endif
 	Reader *reader;
-	Cell *cell;
-	print(cell = read(reader = reader_make(stdin)));
-	freecell(cell);
+	Cell *sexp;
+	Cell *res;
+	print(res = eval(sexp = read(reader = reader_make(stdin))));
+	fflush(stdout);
+	freecell(&sexp);
+	freecell(&res);
 	if (reader->err) {
-		puts(READ_ERR2STR[reader->err]);
+		fprintf(stderr, "%s\n", READ_ERR2STR[reader->err]);
 	}
 	free(reader);
 }
