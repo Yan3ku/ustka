@@ -1,5 +1,5 @@
 CPPFLAGS = -D_DEFAULT_SOURCE
-CFLAGS   = -ggdb -std=c99 -pedantic -Wextra -Wall ${CPPFLAGS} ${DEBUG}
+CFLAGS   = -ggdb -std=c11 -pedantic -Wextra -Wall ${CPPFLAGS} ${DEBUG}
 LDFLAGS  = ${DEBUG}
 
 BIN = prog

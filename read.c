@@ -1,23 +1,22 @@
-#include <stdio.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <math.h>
-#include <assert.h>
+#include "aux.h"
+#include "types/vec.h"
+#include "types/cell.h"
+#include "types/arena.h"
 #include "read.h"
-#include "vec.h"
 
 
-#define nil (void *)0
-
 typedef enum {
 	OK,
 	EOF_ERR,
 	DOT_FOLLOW_ERR,
 	TO_MANY_DOTS_ERR,
-	UNMATCHED_RPAREN_ERR,
-	UNMATCHED_RBRACKET_ERR,
+	NOTHING_BEFORE_DOT_ERR,
+	NOTHING_AFTER_DOT_ERR,
+	DOT_CONTEXT_ERR,
+	UNMATCHED_BRA_ERR,
+	UNMATCHED_SBRA_ERR,
+	UNMATCHED_KET_ERR,
+	UNMATCHED_SKET_ERR,
 } ReadErr;
 
 
@@ -26,49 +25,26 @@ const char *READ_ERR[] = {
 	[EOF_ERR]             	 = "unexpected end of file",
 	[DOT_FOLLOW_ERR]      	 = "more than one object follows . in list",
 	[TO_MANY_DOTS_ERR]       = "to many dots",
-	[UNMATCHED_RPAREN_ERR]   = "unmatched close parenthesis",
-	[UNMATCHED_RBRACKET_ERR] = "unmatched close bracket",
+	[NOTHING_BEFORE_DOT_ERR] = "nothing appears before . in list.",
+	[NOTHING_AFTER_DOT_ERR]  = "nothing appears after . in list.",
+	[DOT_CONTEXT_ERR]        = "dot context error",
+	[UNMATCHED_BRA_ERR]      = "unmatched opening parenthesis",
+	[UNMATCHED_SBRA_ERR]     = "unmatched opening square bracket",
+	[UNMATCHED_KET_ERR]      = "unmatched close parenthesis",
+	[UNMATCHED_SKET_ERR]     = "unmatched close square bracket",
 };
 
-
-static Cell *cellalloc(CellType type);
-static int reader_isterm(char ch);
-static ReadErr reader_next(Reader *reader);
-static ReadErr readcells(Reader *reader, Cell **cell);
-static void print_aux(Cell *cell, int last);
-
-void
-atomfree(Lit *atom)
-{
-	if (atom->type == A_STRING || atom->type == A_SYMBOL)
-		free(atom->as.string);
-}
-
-
-Cell *
-cellalloc(CellType type)
-{
-	Cell *cell = malloc(sizeof(Cell));
-	cell->type = type;
-	if (type == A_CONS) car(cell) = cdr(cell) = nil;
-	return cell;
-}
-
-void
-freecell(Cell **cell)
-{
-	if (!*cell) return;
-	switch ((*cell)->type) {
-	case A_CONS:
-		freecell(&car(*cell));
-		freecell(&cdr(*cell));
-		break;
-	case A_ATOM:
-		if (strp(*cell) || symp(*cell)) free(strof(*cell));
-	}
-	free(*cell);
-	*cell = nil;
-}
+enum {
+	NIL,			/* NULL returned */
+	BRA,
+	SBRA,
+	KET,
+	SKET,
+	HASH,
+	DOT,
+	QUOTE,
+	BSTICK,
+};
 
 
 /* -- TOKENIZER -- */
@@ -76,28 +52,16 @@ struct Reader {
 	FILE *input;
 	size_t cursor;
 	ReadErr err;
-	Lit atom;
-	enum {
-		T_ATOM,
-		T_LPAREN,
-		T_RPAREN,
-		T_RBRACKET,
-		T_LBRACKET,
-		T_HASH,
-		T_DOT,
-		T_QUOTE,
-		T_BSTICK,
-	} type;
 };
 
 const char *
-readererr(Reader *reader)
+readerr(Reader *reader)
 {
 	return reader->err ? READ_ERR[reader->err] : NULL;
 }
 
 Reader *
-open(FILE *input)
+ropen(FILE *input)
 {
 	Reader *reader = calloc(1, sizeof(Reader));
 	reader->input = input;
@@ -105,36 +69,38 @@ open(FILE *input)
 }
 
 void
-close(Reader *reader)
+rclose(Reader *reader)
 {
 	fclose(reader->input);
 	free(reader);
 }
 
-int
-reader_isterm(char chr)
+static int
+isterm(char chr)
 {
-	return (strchr(")(`'.#", chr) || isspace(chr));
+	return (strchr(")(`'.#", chr) || isspace(chr) || chr == EOF);
 }
 
-ReadErr
-reader_next(Reader *reader)
+static Cell *
+nextitem(Arena *arena, Reader *reader)
 {
 	char chr;
-	reader->err = OK;
 	while (isspace(chr = fgetc(reader->input)) && chr != EOF);
 	switch (chr) {
-	case EOF:  reader->err = EOF_ERR;     return reader->err;
-	case ')':  reader->type = T_RPAREN;   return OK;
-        case '(':  reader->type = T_LPAREN;   return OK;
-	case '[':  reader->type = T_LBRACKET; return OK;
-        case ']':  reader->type = T_RBRACKET; return OK;
-        case '\'': reader->type = T_QUOTE;    return OK;
-        case '`':  reader->type = T_BSTICK;   return OK;
-        case '.':  reader->type = T_DOT;      return OK;
-        case '#':  reader->type = T_HASH;     return OK;
+	case EOF:  return (Cell *)EOF; return nil;
+        case '(':  return (Cell *)BRA;
+	case ')':  return (Cell *)KET;
+	case '[':  return (Cell *)SBRA;
+        case ']':  return (Cell *)SKET;
+        case '\'': return (Cell *)QUOTE;
+        case '`':  return (Cell *)BSTICK;
+        case '.':  return (Cell *)DOT;
+        case '#':  return (Cell *)HASH;
 	case '"': {		/* todo: test string */
-		reader->type = T_ATOM;
+		Cell *cell;
+		cell = cellof(arena, A_ATOM);
+		cell->type = A_STR;
+		cell->string = nil;
 		int esc = 0;
 		Vec(char) str;
 		vec_ini(str);
@@ -154,161 +120,160 @@ reader_next(Reader *reader)
 		if (chr == EOF) {
 			vec_free(str);
 			reader->err = EOF_ERR;
-			return reader->err;
+			return nil;
 		}
 		vec_push(str, '\0');
-		reader->atom.as.string = strdup(str);
+		cell->string = aalloc(arena, strlen(str) + 1);
+		strcpy(cell->string, str);
 		vec_free(str);
-		return OK;
+		return cell;
 	} default: {		/* todo: add double */
-		  reader->type = T_ATOM;
+		  Cell *cell;
 		  ungetc(chr, reader->input);
+		  cell = cellof(arena, A_ATOM);
 		  Vec(char) str;
 		  vec_ini(str);
 		  char *endptr = str;
-		  while (((chr = fgetc(reader->input)) != EOF) && !reader_isterm(chr)) {
+		  while (!isterm(chr = fgetc(reader->input))) {
 			  vec_push(str, chr);
 		  }
 		  ungetc(chr, reader->input);
 		  vec_push(str, '\0');
-		  reader->atom.type = A_INTEGER;
-		  reader->atom.as.integer = strtol(str, &endptr, 10);
+		  cell->integer = strtol(str, &endptr, 10);
 		  if (*endptr == '\0') {
 			  vec_free(str);
-			  reader->atom.type = A_INTEGER;
-			  return OK;
+			  cell->type = A_INT;
+			  return cell;
 
 		  }
-		  reader->atom.type = A_SYMBOL;
-		  reader->atom.as.string = strdup(str);
+		  cell->type = A_SYM;
+		  cell->string = aalloc(arena, strlen(str) + 1);
+		  strcpy(cell->string, str);
 		  vec_free(str);
-		  return OK;
+		  return cell;
 	  }
 	}
 }
 
 
 /* -- READ SEXP -- */
-ReadErr
-readcells(Reader *reader, Cell **cell) /* todo: implement all tokens */
+static Cell * reades_(Arena *arena, Reader *reader);
+
+static void
+discardsexp(Arena *arena, Reader *reader) {
+	Cell *item;
+	ReadErr err = reader->err;
+	int depth = 0;
+	if (reader->err != EOF_ERR && reader->err != NOTHING_AFTER_DOT_ERR) return;
+	while ((item = nextitem(arena, reader)) != (Cell *)EOF) {
+		if (item == (Cell *)BRA) depth++;
+		else if (item == (Cell *)KET) depth--;
+		if (depth < 0) break;
+	}
+	reader->err = err;
+}
+
+Cell *
+readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / panic mode */
 {
-	ReadErr err;
-	if ((err = reader_next(reader))) return err;
-	switch (reader->type) {
-        case T_LPAREN: {
-		fprintf(stderr, "T_LAPREN readcells\n");
-		*cell = cellalloc(A_CONS);
-	        if ((err = readcells(reader, &car(*cell)))) return err;
-		if ((err = readcells(reader, &cdr(*cell)))) return err;
-		return OK;
-	} case T_RPAREN:
-		fprintf(stderr, "T_PAREN readcells\n");
-		*cell = nil;
-		return OK;
-	case T_DOT:
-		fprintf(stderr, "T_DOT readcells\n");
-		if (!(*cell = read(reader))) return reader->err;
-		if ((err = reader_next(reader))) return err;
-		if (reader->type != T_RPAREN) {
-			if (reader->type == T_ATOM) atomfree(&reader->atom);
-			reader->err = DOT_FOLLOW_ERR;
-			return reader->err;
+	Cell *tl = nil;
+	Cell *hd = nil;
+	Cell *item = nextitem(arena, reader);
+	while (item != (Cell *)KET) {
+		switch ((uint64_t)item) {
+		case BRA:
+			item = readrest(arena, reader);
+			if (reader->err) {
+				discardsexp(arena, reader);
+				return nil;
+			}
+			break;
+		case EOF:
+			reader->err = EOF_ERR;
+			return nil;
+		case DOT:
+			if (!tl) {
+				reader->err = NOTHING_BEFORE_DOT_ERR;
+				return nil;
+			}
+			CDR(tl) = reades_(arena, reader);
+			if (reader->err) {
+				if (reader->err == UNMATCHED_KET_ERR)
+					reader->err = NOTHING_AFTER_DOT_ERR;
+				return nil;
+			}
+			if (readrest(arena, reader) != nil || reader->err) {
+				reader->err = DOT_FOLLOW_ERR;
+				return nil;
+			}
+			return hd;
 		}
-		return OK;
-	case T_ATOM: {
-		fprintf(stderr, "T_INTEGER readcells\n");
-		*cell = cellalloc(A_CONS);
-		car(*cell) = cellalloc(A_ATOM);
-		memcpy(&atomof(car(*cell)), &reader->atom, sizeof(Lit));
-		if ((err = readcells(reader, &cdr(*cell)))) return err;
-		return OK;
+		Cell *cell = cons(arena, item, nil);
+		if (!hd) hd = cell;
+		else CDR(tl) = cell;
+		tl = cell;
+		item = nextitem(arena, reader);
 	}
-	case T_RBRACKET: reader->err = UNMATCHED_RBRACKET_ERR; return reader->err;
-	default: reader->err = EOF_ERR; return reader->err;
-	}
+
+	return hd;
 }
 
 
 Cell *
-read(Reader *reader)
+reades_(Arena *arena, Reader *reader)
 {
-	Cell *cell;
-        if (reader_next(reader)) return nil;
-	switch (reader->type) { /* todo: handle all cases */
-	case T_LPAREN: {
-		fprintf(stderr, "T_LPAREN read\n");
-		cell = nil;
-		if (readcells(reader, &cell)) freecell(&cell);
+	Cell *item = nextitem(arena, reader);
+	switch ((uint64_t)item) {
+	case 0:    return nil;
+	case BRA: {
+		Cell *cell = readrest(arena, reader);
+		if (reader->err) discardsexp(arena, reader);
 		return cell;
 	}
-	case T_ATOM: {
-		fprintf(stderr, "T_SYM read\n");
-		cell = cellalloc(A_ATOM);
-		memcpy(&atomof(cell), &reader->atom, sizeof(Lit));
-		return cell;
+	case KET:  reader->err = UNMATCHED_KET_ERR;  return nil;
+	case SKET: reader->err = UNMATCHED_SBRA_ERR; return nil;
+	case DOT:  reader->err = DOT_CONTEXT_ERR;    return nil;
+	default:   return item;
 	}
-	case T_RPAREN:   reader->err = UNMATCHED_RPAREN_ERR;   return nil;
-	case T_RBRACKET: reader->err = UNMATCHED_RBRACKET_ERR; return nil;
-	case T_DOT:      reader->err = TO_MANY_DOTS_ERR;       return nil;
-	default: return nil;
-	}
+}
+
+Cell *
+reades(Arena *arena, Reader *reader)
+{
+	reader->err = OK;
+	return reades_(arena, reader);
 }
 
 
 
 /* -- PRINTER -- */
 void
-print_aux(Cell *cell, int last)
-{
-	if (!cell) return;
-	switch (cell->type) {
-	case A_ATOM:
-		if (strp(cell)) {
-			putchar('"');
-		}
-		if (strp(cell) || symp(cell))
-			fputs(strof(cell), stdout);
-		else if (intp(cell))
-			printf("%d", intof(cell));
-		else fprintf(stderr, "print_aux: type not recognized");
-		if (strp(cell)) {
-			putchar('"');
-		}
-		if (!last) putchar(' ');
-		break;
-	case A_CONS: {
-		if (nilp(cell)) {
-			printf("()");
-			return;
-		}
-		if (consp(car(cell))) printf("(");
-		print_aux(car(cell), !cdr(cell));
-		if (consp(car(cell))) {
-			printf(")");
-			if (cdr(cell)) putchar(' ');
-		}
-		if (cdr(cell) && atomp(cdr(cell))) {
-			fputs(". ", stdout);
-		}
-		print_aux(cdr(cell), !!cdr(cell));
-	}
-	}
-}
-
-void
-print(Cell *cell) {
-	if (!cell) {
-		printf("nil");
-		return;
-
-	}
-	switch (cell->type) {
-	case A_CONS:
+printes(Cell *cell) {
+	if (!cell) { printf("nil"); return; }
+	if (CONSP(cell)) {
 		putchar('(');
-		print_aux(cell, 0);
+		printes(CAR(cell));
+		while (CONSP(CDR(cell)))  {
+			putchar(' ');
+			cell = CDR(cell);
+			printes(CAR(cell));
+		};
+		if (ATOMP(CDR(cell))) {
+			fputs(" . ", stdout);
+			printes(CDR(cell));
+		}
 		putchar(')');
-		break;
-	case A_ATOM:
-		print_aux(cell, 0);
+		return;
 	}
+	if (ATOMP(cell)) {
+		switch (cell->type) {
+		case A_STR: printf("\"%s\"", cell->string); break;
+		case A_SYM: printf("%s", cell->string);     break;
+		case A_INT: printf("%d", cell->integer);    break;
+		case A_DOUBL: printf("%f", cell->doubl);    break;
+		case A_VEC: assert(0 && "unimplemented");   break;
+		}
+		return;
+	}
+	assert(0 && "unreachable");
 }
