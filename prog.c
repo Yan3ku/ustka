@@ -4,7 +4,7 @@
 
 void usage() { printf("error\n"); }
 
-int main(int argc, char *argv[]) {
+int main_(int argc, char *argv[]) {
 	Reader *reader = ropen(stdin);
 	Cell *sexp;
 	Arena *arena;
@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
 			printes(sexp);
 			fflush(stdout);
 		}
-		adeinit(arena);
+		deinit(arena);
 	}
 	rclose(reader);
 	return 0;

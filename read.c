@@ -81,13 +81,13 @@ isterm(char chr)
 	return (strchr(")(`'.#", chr) || isspace(chr) || chr == EOF);
 }
 
-static Cell *
+static Cell *			/* todo split string parsing routines */
 nextitem(Arena *arena, Reader *reader)
 {
 	char chr;
 	while (isspace(chr = fgetc(reader->input)) && chr != EOF);
 	switch (chr) {
-	case EOF:  return (Cell *)EOF; return nil;
+	case EOF:  reader->err = EOF_ERR; return (Cell *)EOF; return nil;
         case '(':  return (Cell *)BRA;
 	case ')':  return (Cell *)KET;
 	case '[':  return (Cell *)SBRA;
@@ -123,7 +123,7 @@ nextitem(Arena *arena, Reader *reader)
 			return nil;
 		}
 		vec_push(str, '\0');
-		cell->string = aalloc(arena, strlen(str) + 1);
+		cell->string = new(arena, strlen(str) + 1);
 		strcpy(cell->string, str);
 		vec_free(str);
 		return cell;
@@ -147,7 +147,7 @@ nextitem(Arena *arena, Reader *reader)
 
 		  }
 		  cell->type = A_SYM;
-		  cell->string = aalloc(arena, strlen(str) + 1);
+		  cell->string = new(arena, strlen(str) + 1);
 		  strcpy(cell->string, str);
 		  vec_free(str);
 		  return cell;
@@ -164,7 +164,7 @@ discardsexp(Arena *arena, Reader *reader) {
 	Cell *item;
 	ReadErr err = reader->err;
 	int depth = 0;
-	if (reader->err != EOF_ERR && reader->err != NOTHING_AFTER_DOT_ERR) return;
+	if (reader->err == EOF_ERR || reader->err == NOTHING_AFTER_DOT_ERR) return;
 	while ((item = nextitem(arena, reader)) != (Cell *)EOF) {
 		if (item == (Cell *)BRA) depth++;
 		else if (item == (Cell *)KET) depth--;
@@ -174,13 +174,15 @@ discardsexp(Arena *arena, Reader *reader) {
 }
 
 Cell *
-readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / panic mode */
+readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / restrict
+					* area size? */
 {
 	Cell *tl = nil;
 	Cell *hd = nil;
 	Cell *item = nextitem(arena, reader);
 	while (item != (Cell *)KET) {
 		switch ((uint64_t)item) {
+		case EOF: return nil;
 		case BRA:
 			item = readrest(arena, reader);
 			if (reader->err) {
@@ -188,9 +190,6 @@ readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / panic mod
 				return nil;
 			}
 			break;
-		case EOF:
-			reader->err = EOF_ERR;
-			return nil;
 		case DOT:
 			if (!tl) {
 				reader->err = NOTHING_BEFORE_DOT_ERR;
@@ -217,7 +216,6 @@ readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / panic mod
 
 	return hd;
 }
-
 
 Cell *
 reades_(Arena *arena, Reader *reader)
