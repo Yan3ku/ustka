@@ -11,6 +11,7 @@
 #define A_CONS    CELL_MASK
 #define A_ATOM    0
 
+/* probably good idea to clear tag? it will break anyway idk about that */
 #define CELL_CL_TAG(p) ((uint64_t)(p) & ~CELL_MASK)
 #define CELL_AS_PTR(p) ((Cell*)((uint64_t)(p) & 0xFFFFFFFFFFFF))
 #define CONSP(p)       (p && ((uint64_t)p & CELL_MASK) == A_CONS)
@@ -27,6 +28,7 @@ typedef enum {
 	A_DOUBL,
 	A_VEC,
 } AtomVar;
+
 
 typedef struct Cell {
 	union {
@@ -46,9 +48,15 @@ typedef struct Cell {
 	};
 } Cell;
 
+typedef struct {
+	Arena *arena;
+	Cell *cell;
+} Sexp;
+
+
 static inline Cell *
 cellof(Arena *arena, uint64_t mask) {
-	return (Cell *)((uint64_t)new(arena, sizeof(Cell)) | mask);
+	return (Cell *)(CELL_CL_TAG(new(arena, sizeof(Cell))) | mask);
 }
 
 static inline Cell *

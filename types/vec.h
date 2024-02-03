@@ -1,8 +1,7 @@
 #include <stdlib.h>
-#ifndef VEC_
-#define VEC_
+#ifndef VEC_H
+#define VEC_H
 
-/* https://stackoverflow.com/a/20481237/22903728 */
 #define VEC_GROW 1.5
 
 typedef struct {
@@ -11,6 +10,7 @@ typedef struct {
 } Vec_;
 
 #define Vec(type) type *
+#define VEC(type, name) type *name = vec_ini(name)
 #define vecptr(data) ((Vec_ *)(data)-1)
 #define vecdata(vec) ((void *)((Vec_ *)(vec) + 1))
 
@@ -19,12 +19,16 @@ typedef struct {
 #define vec_cap(data) (vecptr(data)->cap)
 
 #define vec_ini(data) vec_init(data, 16)
-#define vec_init(data, siz)                                                    \
-	do {                                                                   \
-		data = vecdata(malloc(sizeof(Vec_) + sizeof(*data) * (siz)));  \
-		vecptr(data)->cap = siz;                                       \
-		vecptr(data)->len = 0;                                         \
-	} while (0)
+#define vec_init(data, siz) vec_init_((void **)&data, sizeof(*data), siz)
+static inline void *
+vec_init_(void **data, size_t els, size_t siz)
+{
+	*data = vecdata(malloc(sizeof(Vec_) + els * siz));
+	vecptr(*data)->cap = siz;
+	vecptr(*data)->len = 0;
+	return *data;
+}
+
 
 #define vec_free(data)                                                         \
 	do {                                                                   \

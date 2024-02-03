@@ -1,6 +1,8 @@
 #ifndef ATOM_H
 #define ATOM_H
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 typedef union {
 	uint64_t as_uint;
@@ -39,11 +41,24 @@ typedef union {
 
 /* add tag mask */
 #define CLEAR_TAG(p) ((uint64_t)(p) & ~NANISH_MASK)
-#define TO_VEC(p) ((uint64_t)(p) | VEC_MASK)
-#define TO_STR(p) ((uint64_t)(p) | STR_MASK)
-#define TO_SYM(p) ((uint64_t)(p) | SYM_MASK)
-#define TO_MAP(p) ((uint64_t)(p) | MAP_MASK)
-#define TO_SET(p) ((uint64_t)(p) | SET_MASK)
-#define TO_INT(i) (CLEAR_TAG((uint64_t)(i)) | INT_MASK)
+#define TO_VEC(p) ((Atom){ .as_uint = (uint64_t)(p) | VEC_MASK })
+#define TO_STR(p) ((Atom){ .as_uint = (uint64_t)(p) | STR_MASK })
+#define TO_SYM(p) ((Atom){ .as_uint = (uint64_t)(p) | SYM_MASK })
+#define TO_MAP(p) ((Atom){ .as_uint = (uint64_t)(p) | MAP_MASK })
+#define TO_SET(p) ((Atom){ .as_uint = (uint64_t)(p) | SET_MASK })
+/* negative ints have the upper bits set so tag must be cleared */
+#define TO_INT(i) ((Atom){ .as_uint = CLEAR_TAG((uint64_t)(i)) | INT_MASK })
+#define TO_DOUBL(d) ((Atom){ .as_double = d })
+
+static inline const char *
+atomstr(Atom atom)
+{
+	static char buff[BUFSIZ];
+	if      (INTP(atom)) snprintf(buff, BUFSIZ, "%d",     AS_INT(atom));
+	else if (INTP(atom)) snprintf(buff, BUFSIZ, "%f",     AS_DOUBL(atom));
+	else if (STRP(atom)) snprintf(buff, BUFSIZ, "\"%s\"", AS_PTR(atom));
+	else if (SYMP(atom)) snprintf(buff, BUFSIZ, "%s",     AS_PTR(atom));
+	return buff;
+}
 
 #endif

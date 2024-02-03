@@ -1,3 +1,4 @@
+/*** The Mighty Sexp Reader ***/
 #include "aux.h"
 #include "types/vec.h"
 #include "types/cell.h"
@@ -8,43 +9,46 @@
 typedef enum {
 	OK,
 	EOF_ERR,
-	DOT_FOLLOW_ERR,
+	DOT_MANY_FOLLOW_ERR,
 	TO_MANY_DOTS_ERR,
 	NOTHING_BEFORE_DOT_ERR,
 	NOTHING_AFTER_DOT_ERR,
 	DOT_CONTEXT_ERR,
 	UNMATCHED_BRA_ERR,
-	UNMATCHED_SBRA_ERR,
 	UNMATCHED_KET_ERR,
+	UNMATCHED_SBRA_ERR,
 	UNMATCHED_SKET_ERR,
 } ReadErr;
 
 
 const char *READ_ERR[] = {
-	[OK]                  	 = "OK",
+	[OK]                  	 = "READER SAYS OK",
 	[EOF_ERR]             	 = "unexpected end of file",
-	[DOT_FOLLOW_ERR]      	 = "more than one object follows . in list",
+	[DOT_MANY_FOLLOW_ERR]    = "more than one object follows . in list",
 	[TO_MANY_DOTS_ERR]       = "to many dots",
 	[NOTHING_BEFORE_DOT_ERR] = "nothing appears before . in list.",
 	[NOTHING_AFTER_DOT_ERR]  = "nothing appears after . in list.",
 	[DOT_CONTEXT_ERR]        = "dot context error",
 	[UNMATCHED_BRA_ERR]      = "unmatched opening parenthesis",
-	[UNMATCHED_SBRA_ERR]     = "unmatched opening square bracket",
 	[UNMATCHED_KET_ERR]      = "unmatched close parenthesis",
+	[UNMATCHED_SBRA_ERR]     = "unmatched opening square bracket",
 	[UNMATCHED_SKET_ERR]     = "unmatched close square bracket",
 };
 
-enum {
-	NIL,			/* NULL returned */
+/* 'nextitem` either returns token from this enum or Cell *
+   the NIL is reserved for returning NULL/nil in error case */
+/* BRA is opening, KET is closing parenthesis */
+typedef enum {
+	NIL,
 	BRA,
-	SBRA,
 	KET,
+	SBRA,
 	SKET,
 	HASH,
 	DOT,
 	QUOTE,
 	BSTICK,
-};
+} Token;
 
 
 /* -- TOKENIZER -- */
@@ -75,7 +79,7 @@ rclose(Reader *reader)
 	free(reader);
 }
 
-static int
+static int			/* is character terminating sexp */
 isterm(char chr)
 {
 	return (strchr(")(`'.#", chr) || isspace(chr) || chr == EOF);
@@ -102,8 +106,7 @@ nextitem(Arena *arena, Reader *reader)
 		cell->type = A_STR;
 		cell->string = nil;
 		int esc = 0;
-		Vec(char) str;
-		vec_ini(str);
+		VEC(char, str);
 		while ((chr = fgetc(reader->input)) != EOF) {
 			if (esc) {
 				esc = 0;
@@ -131,8 +134,7 @@ nextitem(Arena *arena, Reader *reader)
 		  Cell *cell;
 		  ungetc(chr, reader->input);
 		  cell = cellof(arena, A_ATOM);
-		  Vec(char) str;
-		  vec_ini(str);
+		  VEC(char, str);
 		  char *endptr = str;
 		  while (!isterm(chr = fgetc(reader->input))) {
 			  vec_push(str, chr);
@@ -157,6 +159,7 @@ nextitem(Arena *arena, Reader *reader)
 
 
 /* -- READ SEXP -- */
+/* -es stands for (e)S-expression */
 static Cell * reades_(Arena *arena, Reader *reader);
 
 static void
@@ -164,6 +167,7 @@ discardsexp(Arena *arena, Reader *reader) {
 	Cell *item;
 	ReadErr err = reader->err;
 	int depth = 0;
+	/* because NOTHING_AFTER_DOT_ERR consumes KET synchronization can be omited */
 	if (reader->err == EOF_ERR || reader->err == NOTHING_AFTER_DOT_ERR) return;
 	while ((item = nextitem(arena, reader)) != (Cell *)EOF) {
 		if (item == (Cell *)BRA) depth++;
@@ -173,9 +177,8 @@ discardsexp(Arena *arena, Reader *reader) {
 	reader->err = err;
 }
 
-Cell *
-readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / restrict
-					* area size? */
+Cell * /* todo: implement all tokens / make area size fixed? */
+readrest(Arena *arena, Reader *reader)
 {
 	Cell *tl = nil;
 	Cell *hd = nil;
@@ -185,7 +188,7 @@ readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / restrict
 		case EOF: return nil;
 		case BRA:
 			item = readrest(arena, reader);
-			if (reader->err) {
+			if (reader->err) { /* synchronize to the next sexp */
 				discardsexp(arena, reader);
 				return nil;
 			}
@@ -202,7 +205,7 @@ readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / restrict
 				return nil;
 			}
 			if (readrest(arena, reader) != nil || reader->err) {
-				reader->err = DOT_FOLLOW_ERR;
+				reader->err = DOT_MANY_FOLLOW_ERR;
 				return nil;
 			}
 			return hd;
@@ -213,7 +216,6 @@ readrest(Arena *arena, Reader *reader) /* todo: implement all tokens / restrict
 		tl = cell;
 		item = nextitem(arena, reader);
 	}
-
 	return hd;
 }
 
