@@ -17,6 +17,8 @@ typedef struct {
 #define vec_siz(data) (sizeof(Vec_) + sizeof(*data) + vecptr(data)->cap)
 #define vec_len(data) (vecptr(data)->len)
 #define vec_cap(data) (vecptr(data)->cap)
+#define vec_end(data) (data[vec_len(data) - 1])
+
 
 #define vec_ini(data) vec_init(data, 16)
 #define vec_init(data, siz) vec_init_((void **)&data, sizeof(*data), siz)

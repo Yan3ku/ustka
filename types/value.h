@@ -1,5 +1,5 @@
-#ifndef ATOM_H
-#define ATOM_H
+#ifndef VALUE_H
+#define VALUE_H
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,7 +7,7 @@
 typedef union {
 	uint64_t as_uint;
 	double as_double;
-} Atom;
+} Value;
 
 #define NANISH	    0x7ffc000000000000 /* distinguish "our" NAN with one additional bit */
 #define NANISH_MASK 0xffff000000000000 /* [SIGN/PTR_TAG] + 11*[EXP] + 2*[NANISH] + 2*[TAG] */
@@ -41,23 +41,20 @@ typedef union {
 
 /* add tag mask */
 #define CLEAR_TAG(p) ((uint64_t)(p) & ~NANISH_MASK)
-#define TO_VEC(p) ((Atom){ .as_uint = (uint64_t)(p) | VEC_MASK })
-#define TO_STR(p) ((Atom){ .as_uint = (uint64_t)(p) | STR_MASK })
-#define TO_SYM(p) ((Atom){ .as_uint = (uint64_t)(p) | SYM_MASK })
-#define TO_MAP(p) ((Atom){ .as_uint = (uint64_t)(p) | MAP_MASK })
-#define TO_SET(p) ((Atom){ .as_uint = (uint64_t)(p) | SET_MASK })
+#define TO_STR(p) ((Value){ .as_uint = (uint64_t)(p) | STR_MASK })
+#define TO_SYM(p) ((Value){ .as_uint = (uint64_t)(p) | SYM_MASK })
 /* negative ints have the upper bits set so tag must be cleared */
-#define TO_INT(i) ((Atom){ .as_uint = CLEAR_TAG((uint64_t)(i)) | INT_MASK })
-#define TO_DOUBL(d) ((Atom){ .as_double = d })
+#define TO_INT(i) ((Value){ .as_uint = CLEAR_TAG((uint64_t)(i)) | INT_MASK })
+#define TO_DOUBL(d) ((Value){ .as_double = d })
 
 static inline const char *
-atomstr(Atom atom)
+valuestr(Value val)
 {
 	static char buff[BUFSIZ];
-	if      (INTP(atom)) snprintf(buff, BUFSIZ, "%d",     AS_INT(atom));
-	else if (INTP(atom)) snprintf(buff, BUFSIZ, "%f",     AS_DOUBL(atom));
-	else if (STRP(atom)) snprintf(buff, BUFSIZ, "\"%s\"", AS_PTR(atom));
-	else if (SYMP(atom)) snprintf(buff, BUFSIZ, "%s",     AS_PTR(atom));
+	if      (INTP(val))   snprintf(buff, BUFSIZ, "%d",     AS_INT(val));
+	else if (DOUBLP(val)) snprintf(buff, BUFSIZ, "%f",     AS_DOUBL(val));
+	else if (STRP(val))   snprintf(buff, BUFSIZ, "\"%s\"", AS_PTR(val));
+	else if (SYMP(val))   snprintf(buff, BUFSIZ, "%s",     AS_PTR(val));
 	return buff;
 }
 

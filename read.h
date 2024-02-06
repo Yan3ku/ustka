@@ -1,9 +1,13 @@
 #include <stdio.h>
-#include "types/cell.h"
+#include "types/sexp.h"
+
+#define PRINTES_LOCATION 1
 
 typedef struct Reader Reader;
 const char *readerr(Reader *reader);
-Reader *ropen(FILE *input);
+size_t readerrat(Reader *reader);
+Reader *ropen(const char *input);
 void rclose(Reader *reader);
-Cell *reades(Arena *arena, Reader *reader);
-void printes(Cell *cell);
+Sexp *reades(Reader *reader);
+void sexpfree(Sexp *sexp);
+void printes(Sexp *sexp);
