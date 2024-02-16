@@ -9,6 +9,7 @@ typedef struct {
 	enum {
 		OK,
 		EOF_ERR,
+		EOFU_ERR,	/* unexpected end of input */
 		DOT_MANY_FOLLOW_ERR,
 		NOTHING_BEFORE_DOT_ERR,
 		NOTHING_AFTER_DOT_ERR,
@@ -23,7 +24,8 @@ typedef struct {
 
 const char *READ_ERR[] = {
 	[OK]                  	 = "READER SAYS OK :)",
-	[EOF_ERR]             	 = "unexpected end of file",
+	[EOF_ERR]                = "end of file",
+	[EOFU_ERR]             	 = "unexpected end of file",
 	[DOT_MANY_FOLLOW_ERR]    = "more than one object follows . in list",
 	[NOTHING_BEFORE_DOT_ERR] = "nothing appears before . in list.",
 	[NOTHING_AFTER_DOT_ERR]  = "nothing appears after . in list.",
@@ -38,7 +40,8 @@ const char *READ_ERR[] = {
  * the NIL is reserved for returning NULL/nil in error case */
 /* BRA is opening, KET is closing parenthesis */
 typedef enum {
-	NIL,
+	EOF2 = EOF,
+	NIL = 0,
 	BRA,
 	KET,
 	SBRA,
@@ -74,13 +77,22 @@ Reader *
 ropen(const char *fname)
 {
 	Reader *reader = calloc(1, sizeof(Reader));
-	if (!fname) reader->input = stdin;
+	if (!fname) {
+		reader->input = stdin;
+		fname = "<stdin>";
+	}
 	else if (!(reader->input = fopen(fname, "r"))) {
 		perror("ropen:");
 		return nil;
 	}
 	reader->fname = fname;
 	return reader;
+}
+
+int
+readeof(Reader *reader)
+{
+	return reader->err.type == EOF_ERR;
 }
 
 void
@@ -146,12 +158,31 @@ readsym(Reader *reader, Vec(char) str)
 	return reader->cursor - pos;
 }
 
+static char
+skipspace(Reader *reader)
+{
+	char chr;
+	while (isspace(chr = rgetc(reader)) && chr != EOF);
+	return chr;
+}
+
+static char
+skipcom(Reader *reader)
+{
+	char chr;
+	chr = skipspace(reader);
+	if (chr == ';') {
+		while ((chr = rgetc(reader)) != '\n' && chr != EOF);
+		chr = skipspace(reader);
+	}
+	return chr;
+}
 
 static Cell *			/* todo split string parsing routines */
 nextitem(Arena *arena, Reader *reader)
 {
 	char chr;
-	while (isspace(chr = rgetc(reader)) && chr != EOF);
+	chr = skipcom(reader);
 	switch (chr) {
         case '(':  return (Cell *)BRA;
 	case ')':  return (Cell *)KET;
@@ -163,7 +194,7 @@ nextitem(Arena *arena, Reader *reader)
         case '#':  return (Cell *)HASH;
 	case EOF:
 		reader->err = (ReadErr){EOF_ERR, reader->cursor};
-		return (Cell *)EOF;
+		return (Cell *)EOF2;
 	case '"': {		/* todo: test string */
 		VEC(char, str);
 		Cell *cell = cellof(arena, A_ATOM, reader->cursor - 1);
@@ -212,9 +243,11 @@ discardsexp(Arena *arena, Reader *reader) {
 	ReadErr err = reader->err;
 	int depth = 0;
 	/* because NOTHING_AFTER_DOT_ERR consumes KET synchronization can be omited */
-	if (reader->err.type == EOF_ERR || reader->err.type == NOTHING_AFTER_DOT_ERR)
+	if (reader->err.type == EOF_ERR ||
+	    reader->err.type == EOFU_ERR ||
+	    reader->err.type == NOTHING_AFTER_DOT_ERR)
 		return;
-	while ((item = nextitem(arena, reader)) != (Cell *)EOF) {
+	while ((item = nextitem(arena, reader)) != (Cell *)EOF2) {
 		if (item == (Cell *)BRA) depth++;
 		else if (item == (Cell *)KET) depth--;
 		if (depth < 0) break;
@@ -232,7 +265,9 @@ readrest(Arena *arena, Reader *reader)
 	Cell *item = nextitem(arena, reader);
 	while (item != (Cell *)KET) {
 		switch ((uint64_t)item) {
-		case EOF: return nil;
+		case EOF2:	/* this is unexpected EOF, make it unexpected */
+			reader->err.type = EOFU_ERR;
+			return nil;
 		case BRA:
 			item = readrest(arena, reader);
 			if (reader->err.type) {
@@ -293,6 +328,7 @@ reades_(Arena *arena, Reader *reader)
 {
 	Cell *item = nextitem(arena, reader);
 	switch ((uint64_t)item) {
+	case EOF2: return nil;
 	case 0:    return nil;
 	case BRA: {
 		Cell *cell = readrest(arena, reader);

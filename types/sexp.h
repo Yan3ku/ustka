@@ -25,7 +25,7 @@
 #define CAR(p)         (CELL(p)->car_)
 #define CDR(p)         (CELL(p)->cdr_)
 
-#define RANGEFMT "<%lu|%lu>"
+#define RANGEFMT "<%lu,%lu>"
 #define RANGEP(range) range.at, range.len
 
 typedef enum {

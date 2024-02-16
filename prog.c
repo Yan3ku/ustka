@@ -5,22 +5,20 @@
 void usage() { printf("error\n"); }
 
 int main_(int argc, char *argv[]) {
-	Reader *reader = ropen(stdin);
-	Cell *sexp;
-	Arena *arena;
+	Reader *reader = ropen(NULL);
+	Sexp *sexp;
 	ARGBEGIN {
 		case 'a': printf("%s", ARGF()); break;
 	} ARGEND
 	for (int i = 0; i < 3; i++) {
-		arena = aini();
-		sexp = reades(arena, reader);
+		sexp = reades(reader);
 		if (readerr(reader)) {
 			fprintf(stderr, "%s\n", readerr(reader));
 		} else {
 			printes(sexp);
 			fflush(stdout);
 		}
-		deinit(arena);
+		sexpfree(sexp);
 	}
 	rclose(reader);
 	return 0;

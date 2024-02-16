@@ -4,6 +4,8 @@
 
 #define VEC_GROW 1.5
 
+/* because vec can be of any type these have to be macros */
+/* dont question my decisions, i know what im doing */
 typedef struct {
 	size_t cap;
 	size_t len;

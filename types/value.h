@@ -29,6 +29,7 @@ typedef union {
 #define BOOLP(v)  ((v.as_uint & BOOL_MASK) == BOOL_MASK)
 #define PTRP(v)   ((v.as_uint & PTR_MASK) == PTR_MASK)
 #define INTP(v)   ((v.as_uint & NANISH_MASK) == INT_MASK)
+#define NUMP(v)   (INTP(v) || DOUBLP(v))
 #define STRP(v)   ((v.as_uint & NANISH_MASK) == STR_MASK)
 #define SYMP(v)   ((v.as_uint & NANISH_MASK) == SYM_MASK)
 #define OBJP(v)   ((v.as_uint & NANISH_MASK) == BOJ_MASK)
@@ -46,6 +47,17 @@ typedef union {
 /* negative ints have the upper bits set so tag must be cleared */
 #define TO_INT(i) ((Value){ .as_uint = CLEAR_TAG((uint64_t)(i)) | INT_MASK })
 #define TO_DOUBL(d) ((Value){ .as_double = d })
+
+
+#define TYPE_ERR(type, val)						\
+	printf("; The value\n;\t%s\n; doesn't satisfy predicate\n;\t%s\n", valuestr(val), type)
+
+#define AS_NUM(val) (INTP(val) ? AS_INT(val) :		\
+		     DOUBLP(val) ? AS_DOUBL(val) :	\
+		     (assert(0 && "unreachable"), 0))
+
+#define ASSERTV(type, val) (!type(val) ? (TYPE_ERR(#type, val), 1) : 0)
+
 
 static inline const char *
 valuestr(Value val)
