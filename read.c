@@ -1,7 +1,9 @@
 /*;; The Sexp Reader For More Civilized Age ;;*/
+/* todo: add macro suppprt */
+#include "aux.h"
 #include "types/vec.h"
-#include "types/sexp.h"
 #include "types/arena.h"
+#include "types/sexp.h"
 #include "read.h"
 
 

@@ -1,9 +1,10 @@
-#include <sysexits.h>
+#include "aux.h"
 #include "types/vec.h"
 #include "types/value.h"
 #include "types/arena.h"
-#include "btc.h"
+#include "types/sexp.h"
 #include "read.h"
+#include "btc.h"
 
 #define STACK_MAX 4096
 #define VM_TRACE 1
@@ -62,20 +63,21 @@ Value pop(void) { return *(--vm.sp); }
 void
 printstack()
 {
-	printf(";;; STACK BEG ;;;\n");
+	printf(";;; STACK BEG\n");
 	for (Value* slot = vm.stack; slot < vm.sp; slot++) {
 		printf(" %s ", valuestr(*slot));
 		if (slot + 1 < vm.sp) putchar('|');
 	}
-	printf("\n;;; STACK END ;;;\n");
+	printf("\n;;; STACK END\n");
 }
 
 EvalErr
 run()
 {
+	int i = 0;
 	for (;;) {
 #ifdef VM_TRACE
-		printf("===========================================\n");
+		printf(";;;; [CYCLE %04i] ;;;;;\n", ++i);
 		decompile_op(vm.chunk, vm.ip - vm.chunk->code);
 		printstack();
 		printf(";; EXECUTING...\n");
@@ -129,29 +131,33 @@ RET:
 }
 
 int main(int argc, char *argv[]) {
-	vminit();
 	const char *input = argc > 1 ? argv[1] : NULL;
 	Reader *reader = ropen(input);
+	Sexp *sexp;
+	int err = 0;
+	vminit();
 	do {
 		if (!input) printf("> ");
-		Sexp *sexp = reades(reader);
+		sexp = reades(reader);
 		if (readerr(reader)) {
 			fprintf(stderr, "%ld: %s\n", readerrat(reader), readerr(reader));
-			exit(EX_DATAERR);
+			err = EX_DATAERR;
+			goto EXIT;
 		}
-		printf(";;; INPUT BEG ;;;\n");
+		printf(";;; INPUT BEG\n");
 		printes(sexp);
-		printf("\n;;; INPUT END ;;;\n");
+		printf("\n;;; INPUT END\n");
 		fflush(stdout);
-		/* 	decompile(chunk, "test"); */
-		EvalErr err = eval(sexp);
-		switch (err) {
-		case COMPILE_ERR: exit(EX_DATAERR); break;
-		case RUNTIME_ERR: exit(EX_SOFTWARE); break;
-		case OK: continue;
+		switch (eval(sexp)) {
+		case COMPILE_ERR: err = EX_DATAERR;  goto EXIT; break;
+		case RUNTIME_ERR: err = EX_SOFTWARE; goto EXIT; break;
+		case OK: break;
 		}
+		sexpfree(sexp);
 	} while (!readeof(reader));
+EXIT:
+	sexpfree(sexp);
 	rclose(reader);
 	vmfree();
-	return 0;
+	return err;
 }

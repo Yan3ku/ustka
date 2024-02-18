@@ -1,11 +1,16 @@
-#include "read.h"
+#include "aux.h"
+#include "types/arena.h"
+#include "types/value.h"
+#include "types/sexp.h"
+#include "types/vec.h"
 #include "btc.h"
+#include "read.h"
 
+/* DECOMPILATION */
 struct SerialRange {
 	Range range;
 	size_t count;		/* count of repetitive ranges */
 };
-
 
 void
 chunkfree(Chunk *chunk)
@@ -44,62 +49,10 @@ whereis(Chunk *chunk, ptrdiff_t offset)
 {
 	size_t i = 0;
 	ptrdiff_t cursor = chunk->where[0].count;
-	while (cursor <= offset) {
+	while (cursor <= offset)
 		cursor += chunk->where[++i].count;
-	}
 	return chunk->where[i].range;
 }
-
-static void
-emitcons(Chunk *chunk, Value val, Range pos) {
-	vec_push(chunk->conspool, val);
-	emit(chunk, OP_CONS, pos);
-	emit(chunk, vec_len(chunk->conspool) - 1, pos);
-}
-
-
-
-static void compile_(Cell *cell, Chunk *chunk);
-
-static void
-compilerest(Cell *cell, Chunk *chunk)
-{
-	if (!cell) return;
-	if (ATOMP(CAR(cell))) {
-		if (CAR(cell)->type == A_INT) {
-			emitcons(chunk, TO_INT(CAR(cell)->integer), CELL_LOC(CAR(cell)));
-		}
-	} else if (CONSP(CAR(cell))) {
-		compile_(CAR(cell), chunk);
-	}
-	compilerest(CDR(cell), chunk);
-}
-
-static void
-compile_(Cell *cell, Chunk *chunk)
-{
-	if (!cell) return;
-	if (ATOMP(CAR(cell))) {
-		if (CAR(cell)->type == A_SYM) {
-			if (!strcmp(CAR(cell)->string, "+")) {
-				compilerest(CDR(cell), chunk);
-				emit(chunk, OP_ADD, CELL_LOC(CAR(cell)));
-				return;
-			}
-		}
-	}
-}
-
-Chunk *
-compile(Sexp *sexp)
-{
-	Cell *cell = sexp->cell;
-	Chunk *chunk = chunknew();
-	compile_(cell, chunk);
-	emit(chunk, OP_RET, (Range){0, 0});
-	return chunk;
-}
-
 
 static ptrdiff_t
 basic_op(const char *name, ptrdiff_t offset)
@@ -135,8 +88,7 @@ decompile_header(const char *name)
 	printcol(ARGS_COL);
 	printcol(NOTE_COL);
 	printf("\n");
-};
-
+}
 
 static ptrdiff_t
 decompile_op_(Chunk *chunk, ptrdiff_t offset)
@@ -185,5 +137,56 @@ decompile(Chunk *chunk, const char *name)
 	for (size_t offset = 0; offset < vec_len(chunk->code);)
 		offset = decompile_op_(chunk, offset);
 	printf(";\n");
-	printf(";;; END ;;;;;;;;;;;;;;;;;;;;;;;\n");
+	printf(";;; [END]\n");
+}
+
+/* COMPILATION */
+static void
+emitcons(Chunk *chunk, Value val, Range pos) {
+	vec_push(chunk->conspool, val);
+	emit(chunk, OP_CONS, pos);
+	emit(chunk, vec_len(chunk->conspool) - 1, pos);
+}
+
+
+
+static void compile_(Cell *cell, Chunk *chunk);
+
+static void
+compilerest(Cell *cell, Chunk *chunk)
+{
+	if (!cell) return;
+	if (ATOMP(CAR(cell))) {
+		if (CAR(cell)->type == A_INT) {
+			emitcons(chunk, TO_INT(CAR(cell)->integer), CELL_LOC(CAR(cell)));
+		}
+	} else if (CONSP(CAR(cell))) {
+		compile_(CAR(cell), chunk);
+	}
+	compilerest(CDR(cell), chunk);
+}
+
+static void
+compile_(Cell *cell, Chunk *chunk)
+{
+	if (!cell) return;
+	if (ATOMP(CAR(cell))) {
+		if (CAR(cell)->type == A_SYM) {
+			if (!strcmp(CAR(cell)->string, "+")) {
+				compilerest(CDR(cell), chunk);
+				emit(chunk, OP_ADD, CELL_LOC(CAR(cell)));
+				return;
+			}
+		}
+	}
+}
+
+Chunk *
+compile(Sexp *sexp)
+{
+	Cell *cell = sexp->cell;
+	Chunk *chunk = chunknew();
+	compile_(cell, chunk);
+	emit(chunk, OP_RET, (Range){0, 0});
+	return chunk;
 }

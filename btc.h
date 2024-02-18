@@ -1,6 +1,8 @@
+/*
 #include "types/value.h"
 #include "types/sexp.h"
 #include "types/vec.h"
+*/
 
 #define BYTE_COL  "5"
 #define WHERE_COL "7"
@@ -9,7 +11,7 @@
 #define NOTE_COL  "4"
 
 #define DECOMP_HEADER							\
-	";;; %s ;;;\n; %-"BYTE_COL"s ; %-"WHERE_COL"s ; %-"CODE_COL"s ; %-"ARGS_COL"s ; %s"
+	";;; %s\n; %-"BYTE_COL"s ; %-"WHERE_COL"s ; %-"CODE_COL"s ; %-"ARGS_COL"s ; %s"
 
 typedef struct SerialRange SerialRange;
 

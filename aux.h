@@ -45,6 +45,8 @@ exit 0
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdalign.h>
+#include <sysexits.h>
 
 typedef unsigned char      uchar;
 typedef signed char        schar;

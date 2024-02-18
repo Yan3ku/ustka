@@ -1,9 +1,11 @@
-#ifndef SEXP_H
-#define SEXP_H
+/* todo add support for macros / builtin tokens */
+/*
 #include <stdlib.h>
 #include <assert.h>
-#include <stdint.h>
-#include "arena.h"
+#include <stddef.h>
+#include <stdalign.h>
+#include "types/arena.h"
+*/
 
 #define nil NULL
 
@@ -82,5 +84,3 @@ cons(Arena *arena, Cell *a, Cell *b, size_t at)
 	CDR(cell) = b;
 	return cell;
 }
-
-#endif

@@ -1,11 +1,10 @@
 /* Resizing arena implementation */
-#ifndef ARENA_H
-#define ARENA_H
+/*
+#include "aux.h"
 #include <stdlib.h>
-#include <stdint.h>
 #include <stddef.h>
 #include <stdalign.h>
-#include "../aux.h"
+*/
 
 typedef struct Arena {
 	char *reg;
@@ -52,5 +51,3 @@ new(Arena *a, ptrdiff_t siz) {
 	(*cdr)->ptr += siz;
 	return (*cdr)->reg;
 }
-
-#endif

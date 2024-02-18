@@ -1,8 +1,7 @@
-#ifndef VALUE_H
-#define VALUE_H
-#include <stdint.h>
+/*
 #include <stdio.h>
 #include <stdlib.h>
+*/
 
 typedef union {
 	uint64_t as_uint;
@@ -69,5 +68,3 @@ valuestr(Value val)
 	else if (SYMP(val))   snprintf(buff, BUFSIZ, "%s",     AS_PTR(val));
 	return buff;
 }
-
-#endif

@@ -1,6 +1,6 @@
+/*
 #include <stdlib.h>
-#ifndef VEC_H
-#define VEC_H
+*/
 
 #define VEC_GROW 1.5
 
@@ -55,4 +55,3 @@ vec_init_(void **data, size_t els, size_t siz)
 		vec_ensure(data, 1);                                           \
 		data[vec_len(data)++] = el;                                    \
 	} while (0)
-#endif

@@ -1,5 +1,7 @@
 #define AUX_IMPL
 #include "aux.h"
+#include "types/arena.h"
+#include "types/sexp.h"
 #include "read.h"
 
 void usage() { printf("error\n"); }
