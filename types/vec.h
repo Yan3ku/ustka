@@ -37,23 +37,27 @@ vec_init_(void **data, size_t els, size_t siz) /* for assigment operation in VEC
 
 
 #define vec_free(data) do {                                                    \
-		free(vecptr(data));                                            \
-		data = NULL;                                                   \
+	free(vecptr(data));					               \
+	data = NULL;                                                           \
 } while (0)
 
+/* At the end the `data' is reasigned with new buffer
+ * because of this you shouldn't pass vec directly in function arguments
+ * it will override only the Vec pinter inside fun but not the passed parameter
+ */
 #define vec_ensure(data, siz) do {                                             \
-		if (vec_len(data) + (siz) > vec_cap(data)) {                   \
-			vecptr(data)->cap = vec_len(data) * VEC_GROW;          \
-			if (vec_len(data) + (siz) > vec_cap(data))             \
-				vecptr(data)->cap = vec_len(data) + (siz);     \
-			data = vecdata(realloc(vecptr(data), vec_siz(data)));  \
-		}                                                              \
+	if (vec_len(data) + (siz) > vec_cap(data)) {                           \
+		vecptr(data)->cap = vec_len(data) * VEC_GROW;                  \
+		if (vec_len(data) + (siz) > vec_cap(data))                     \
+			vecptr(data)->cap = vec_len(data) + (siz);             \
+		data = vecdata(realloc(vecptr(data), vec_siz(data)));          \
+	}                                                                      \
 } while (0)
 
 
 /* I would like it to return the inserted index */
 /* but because it's more convenient to insert literal elements it is a macro */
 #define vec_push(data, el) do {					               \
-		vec_ensure(data, 1);		                               \
-		data[vecptr(data)->len++] = el;	                               \
+	vec_ensure(data, 1);		                                       \
+	data[vecptr(data)->len++] = el;	                                       \
 } while (0)
