@@ -3,7 +3,7 @@
 #include <stdlib.h>
 */
 /* NOTE:
- * This hash map is made for storing primitives without storing them in heap
+ * This hash map is made for easy handling of primities without storing them in heap.
  * This is achieved by using macros and = operator inside `ht_set' which copies
  * the value directly.
  *
@@ -15,7 +15,7 @@
  * If you want to understand this code look first into vec.h which uses the same
  * idea for storing the buffer for values and metadata.
  */
-#define HT_INI_CAP 16		/* must be power of 2 */
+#define HT_INI_CAP 16		/* have to be power of 2 */
 #define HT_MIN_LOAD_FAC 0.65f
 #define HT_OVERLOAD(ht) ((ht->len / (float)ht->cap) > HT_MIN_LOAD_FAC)
 
