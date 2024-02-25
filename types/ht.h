@@ -16,23 +16,21 @@ hash_key(const char *key)
 {
     uint64_t hash = FNV_OFFSET;
     for (const char* p = key; *p; p++) {
-        hash ^= (uint64_t)(unsigned char)(*p);
+        hash ^= (uint64_t)(uchar)(*p);
         hash *= FNV_PRIME;
     }
     return hash;
 }
 
-typedef struct {} HTLink; 	/* embed `HTlnk link' into your struct */
-
-typedef struct {
+typedef struct HTEntry {
 	const char *key;
-	HTLink *link;
+	void *link;	/* embed `HTEntry link' into your structure */
 } HTEntry;
 
 typedef struct {
 	size_t cap;
 	size_t len;
-	void (*del)(HTLink *);	/* set this for eventual free */
+	void (*del)(HTEntry *);	/* set this for eventual free */
 	HTEntry *entr;
 } HT;
 
@@ -60,16 +58,18 @@ ht_find_idx(HTEntry *entr, size_t cap, const char *key)
 	return idx;
 }
 
-static inline void
+static inline void *
 ht_free_idx(HT *ht, size_t idx)
 {
-	if (!ht->entr[idx].link) return;
+	if (!ht->entr[idx].link) return (void*)0;
 	free((char*)ht->entr[idx].key);
+	void *link = ht->entr[idx].link;
 	if (ht->del) ht->del(ht->entr[idx].link);
 	ht->entr[idx].link = (void*)0;
+	return link;
 }
 
-static inline HTLink * /* use `entryof' from aux.h for actual addres */
+static inline void * /* use `entryof' from aux.h for actual addres */
 ht_get(HT *ht, const char *key)
 {
 	return ht->entr[ht_find_idx(ht->entr, ht->cap, key)].link;
@@ -91,7 +91,7 @@ ht_ensure(HT *ht)
 }
 
 static inline void
-ht_set(HT *ht, const char *key, HTLink *link)
+ht_set(HT *ht, const char *key, void *link)
 {
 	size_t idx = ht_find_idx(ht->entr, ht->cap, key);
 	if (!ht->entr[idx].link) ht->len++;
@@ -101,11 +101,11 @@ ht_set(HT *ht, const char *key, HTLink *link)
 	ht_ensure(ht);
 }
 
-static inline void
+static inline void *
 ht_del(HT *ht, const char *key)
 {
-	ht_free_idx(ht, ht_find_idx(ht->entr, ht->cap, key));
 	ht->len--;
+	return ht_free_idx(ht, ht_find_idx(ht->entr, ht->cap, key));
 }
 
 static inline void
