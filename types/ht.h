@@ -1,7 +1,20 @@
-/* intrusive single probing resizable hash table / FNV-la hash */
+/* single probing resizable hash table / FNV-la hash */
 /* depends:
 #include <stdlib.h>
 */
+/* NOTE:
+ * This hash map is made for storing primitives without storing them in heap
+ * This is achieved by using macros and = operator inside `ht_set' which copies
+ * the value directly.
+ *
+ * Althought it's easier to store primities the user has to remember to never
+ * pass the hash table pointer directly because the `ht_ensure' macro will
+ * override it when resizing the hash map. User has to box the hash table
+ * so the newly assigned address will be not lost.
+ *
+ * If you want to understand this code look first into vec.h which uses the same
+ * idea for storing the buffer for values and metadata.
+ */
 #define HT_INI_CAP 16		/* must be power of 2 */
 #define HT_MIN_LOAD_FAC 0.65f
 #define HT_OVERLOAD(ht) ((ht->len / (float)ht->cap) > HT_MIN_LOAD_FAC)
@@ -22,96 +35,88 @@ hash_key(const char *key)
     return hash;
 }
 
-typedef struct HTEntry {
-	const char *key;
-	void *link;	/* embed `HTEntry link' into your structure */
-} HTEntry;
-
 typedef struct {
 	size_t cap;
 	size_t len;
-	void (*del)(HTEntry *);	/* set this for eventual free */
-	HTEntry *entr;
-} HT;
+	void (*del)(void *);	/* set this for eventual free */
+	const char **keys;	/* if keys[idx] != nil -> ht[idx] exists */
+} HT_;
 
-#define ht_ini() ht_init(HT_INI_CAP)
-static inline HT *
-ht_init(size_t size)
+#define Ht(type) type *
+#define HT(type, name) type *name = ht_ini(name)
+
+#define htptr(data) ((HT_ *)(data)-1)		   /* internals */
+#define htdata(vec) ((void *)((HT_ *)(vec)+1))
+
+#define ht_ini(data) ht_init(data, HT_INI_CAP)
+#define ht_init(data, siz) ht_init_((void **)&data, sizeof(*data), siz)
+static inline void *		/* function because returns the new vector */
+ht_init_(void **data, size_t els, size_t cap) /* for assigment operation in VEC */
 {
-	HT *ht = malloc(sizeof(HT));
-	ht->entr = calloc(size, sizeof(HTEntry));
-	ht->cap = size;
-	ht->del = (void*)0;
-	ht->len = 0;
-	return ht;
+	*data = htdata(malloc(sizeof(HT_) + cap * els));
+	htptr(*data)->keys = calloc(cap, sizeof(char *));
+	htptr(*data)->cap = cap;
+	htptr(*data)->del = (void*)0;
+	htptr(*data)->len = 0;
+	return *data;
 }
 
+#define ht_exists(ht, key) (htptr(ht)->keys[ht_find_idx(ht, key)] != (void*)0)
+#define ht_get(ht, key) (ht[ht_find_idx(ht, key)])
 static inline size_t
-ht_find_idx(HTEntry *entr, size_t cap, const char *key)
+ht_find_idx(void *data, const char *key)
 {
 	uint64_t hash = hash_key(key);
-	size_t idx = (size_t)(hash & (uint64_t)(cap - 1)); /* fast modulo */
-	while (entr[idx].link) {
-		if (!strcmp(key, entr[idx].key)) return idx;
-		if (++idx >= cap) idx = 0;
+	size_t idx = (size_t)(hash & (uint64_t)(htptr(data)->cap - 1)); /* fast modulo */
+	while (htptr(data)->keys[idx]) {
+		if (!strcmp(key, htptr(data)->keys[idx])) return idx;
+		if (++idx >= htptr(data)->cap) idx = 0;
 	}
 	return idx;
 }
 
+#define ht_free_idx(ht, idx) ht_free_idx_(ht, sizeof(*ht), idx)
 static inline void *
-ht_free_idx(HT *ht, size_t idx)
+ht_free_idx_(void *data, size_t els, size_t idx)
 {
-	if (!ht->entr[idx].link) return (void*)0;
-	free((char*)ht->entr[idx].key);
-	void *link = ht->entr[idx].link;
-	if (ht->del) ht->del(ht->entr[idx].link);
-	ht->entr[idx].link = (void*)0;
-	return link;
+	if (!htptr(data)->keys[idx]) return (void*)0;
+	free((char*)htptr(data)->keys[idx]);
+	htptr(data)->keys[idx] = (void*)0; /* unmark key -> delete */
+	void *entry = (uint8_t*)data + els * idx;
+	if (htptr(data)->del) htptr(data)->del(entry);
+	return entry;
 }
 
-static inline void * /* use `entryof' from aux.h for actual addres */
-ht_get(HT *ht, const char *key)
-{
-	return ht->entr[ht_find_idx(ht->entr, ht->cap, key)].link;
-} /* entryof(ht_get(ht, "key"), StructType, name_of_HTLink_field) */
 
-static inline void
-ht_ensure(HT *ht)
-{
-	if (!HT_OVERLOAD(ht)) return;
-	HTEntry *entr = calloc(ht->cap << 1, sizeof(HTEntry));
-	for (size_t i = 0; i < ht->cap; i++) {
-		if (!ht->entr[i].link) continue;
-		size_t idx = ht_find_idx(entr, ht->cap << 1, ht->entr[i].key);
-		entr[idx] = ht->entr[i];
-	}
-	free(ht->entr);
-	ht->cap <<= 1;
-	ht->entr = entr;
-}
+#define ht_ensure(ht) do {						       \
+	if (!HT_OVERLOAD(htptr(ht))) break;			               \
+	void *nht = ht_init_((void **)&nht, sizeof(*ht), htptr(ht)->cap << 1); \
+	for (size_t i = 0; i < htptr(ht)->cap; i++) {		               \
+		if (!htptr(ht)->keys[i]) continue;		               \
+		size_t dest = ht_find_idx(nht, htptr(ht)->keys[i]);            \
+		htptr(nht)->keys[dest] = htptr(ht)->keys[i];		       \
+		memcpy((char*)nht + dest * sizeof(*ht), ht + i, sizeof(*ht));  \
+	}							               \
+	htptr(nht)->len = htptr(ht)->len;				       \
+	free(htptr(ht)->keys);						       \
+	free(htptr(ht));					               \
+	ht = nht;						               \
+} while (0)
 
-static inline void
-ht_set(HT *ht, const char *key, void *link)
-{
-	size_t idx = ht_find_idx(ht->entr, ht->cap, key);
-	if (!ht->entr[idx].link) ht->len++;
-	ht_free_idx(ht, idx);
-	ht->entr[idx].key = strdup(key);
-	ht->entr[idx].link = link;
-	ht_ensure(ht);
-}
+#define ht_set(ht, key, val) do {                                              \
+	size_t idx = ht_find_idx(ht, key);		                       \
+	if (!htptr(ht)->keys[idx]) htptr(ht)->len++;			       \
+	ht_free_idx(ht, idx);						       \
+	htptr(ht)->keys[idx] = strdup(key);				       \
+	ht[idx] = val;					                       \
+	ht_ensure(ht);							       \
+} while (0)
 
-static inline void *
-ht_del(HT *ht, const char *key)
-{
-	ht->len--;
-	return ht_free_idx(ht, ht_find_idx(ht->entr, ht->cap, key));
-}
+#define ht_del(ht, key) (htptr(ht)->len--, ht_free_idx(ht, ht_find_idx(ht, key)))
 
-static inline void
-ht_free(HT *ht)
-{
-	for (size_t i = 0; i < ht->cap; i++) ht_free_idx(ht, i);
-	free(ht->entr);
-	free(ht);
-}
+
+#define ht_free(ht) do {						       \
+	for (size_t i = 0; i < htptr(ht)->cap; i++) ht_free_idx(ht, i);        \
+	free(htptr(ht)->keys);						       \
+	free(htptr(ht));						       \
+} while (0)
