@@ -31,7 +31,7 @@ typedef union {
 #define NUMP(v)   (INTP(v) || DOUBLP(v))
 #define STRP(v)   ((v.as_uint & NANISH_MASK) == STR_MASK)
 #define SYMP(v)   ((v.as_uint & NANISH_MASK) == SYM_MASK)
-#define OBJP(v)   ((v.as_uint & NANISH_MASK) == BOJ_MASK)
+#define OBJP(v)   ((v.as_uint & NANISH_MASK) == OBJ_MASK)
 
 /* get value */
 #define AS_DOUBL(v) (v.as_double)
@@ -66,5 +66,6 @@ valuestr(Value val)
 	else if (DOUBLP(val)) snprintf(buff, BUFSIZ, "%f",     AS_DOUBL(val));
 	else if (STRP(val))   snprintf(buff, BUFSIZ, "\"%s\"", AS_PTR(val));
 	else if (SYMP(val))   snprintf(buff, BUFSIZ, "%s",     AS_PTR(val));
+	else assert(0 && "valuestr: invalid type; unreachable");
 	return buff;
 }

@@ -14,6 +14,9 @@
  *
  * If you want to understand this code look first into vec.h which uses the same
  * idea for storing the buffer for values and metadata.
+ *
+ * To minimalize to number of hash recalculations use the _idx functions with
+ * already generated index from `ht_find_idx'
  */
 #define HT_INI_CAP 16		/* have to be power of 2 */
 #define HT_MIN_LOAD_FAC 0.65f
@@ -61,8 +64,10 @@ ht_init_(void **data, size_t els, size_t cap) /* for assigment operation in VEC 
 	return *data;
 }
 
-#define ht_exists(ht, key) (htptr(ht)->keys[ht_find_idx(ht, key)] != (void*)0)
-#define ht_get(ht, key) (ht[ht_find_idx(ht, key)])
+/* gettable (element exists) predicate */
+#define ht_getp(ht, key) (htptr(ht)->keys[ht_find_idx(ht, key)] != (void*)0)
+#define ht_idxp(ht, idx) (htptr(ht)->keys[idx] != (void*)0)
+#define ht_get(ht, key)  (ht[ht_find_idx(ht, key)])
 static inline size_t
 ht_find_idx(void *data, const char *key)
 {
@@ -75,15 +80,17 @@ ht_find_idx(void *data, const char *key)
 	return idx;
 }
 
-#define ht_free_idx(ht, idx) ht_free_idx_(ht, sizeof(*ht), idx)
+#define ht_del(ht, key)     ht_del_idx(ht, ht_find_idx(ht, key))
+#define ht_del_idx(ht, idx) ht_del_idx_(ht, sizeof(*ht), idx)
 static inline void *
-ht_free_idx_(void *data, size_t els, size_t idx)
+ht_del_idx_(void *data, size_t els, size_t idx)
 {
 	if (!htptr(data)->keys[idx]) return (void*)0;
 	free((char*)htptr(data)->keys[idx]);
 	htptr(data)->keys[idx] = (void*)0; /* unmark key -> delete */
 	void *entry = (uint8_t*)data + els * idx;
 	if (htptr(data)->del) htptr(data)->del(entry);
+	htptr(data)->len--;
 	return entry;
 }
 
@@ -103,20 +110,19 @@ ht_free_idx_(void *data, size_t els, size_t idx)
 	ht = nht;						               \
 } while (0)
 
+
 #define ht_set(ht, key, val) do {                                              \
 	size_t idx = ht_find_idx(ht, key);		                       \
-	if (!htptr(ht)->keys[idx]) htptr(ht)->len++;			       \
-	ht_free_idx(ht, idx);						       \
+	if (!htptr(ht)->keys[idx]) htptr(ht)->len += 2;			       \
+	ht_del_idx(ht, idx);						       \
 	htptr(ht)->keys[idx] = strdup(key);				       \
 	ht[idx] = val;					                       \
 	ht_ensure(ht);							       \
 } while (0)
 
-#define ht_del(ht, key) (htptr(ht)->len--, ht_free_idx(ht, ht_find_idx(ht, key)))
-
 
 #define ht_free(ht) do {						       \
-	for (size_t i = 0; i < htptr(ht)->cap; i++) ht_free_idx(ht, i);        \
+	for (size_t i = 0; i < htptr(ht)->cap; i++) ht_del_idx(ht, i);         \
 	free(htptr(ht)->keys);						       \
 	free(htptr(ht));						       \
 } while (0)

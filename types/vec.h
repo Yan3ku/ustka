@@ -1,7 +1,8 @@
-/*
+/* depends:
 #include <stdlib.h>
 */
 
+/* TODO: vec_pop, vec_del and shrink */
 #define VEC_GROW 1.5
 #define VEC_INI_CAP 16
 
